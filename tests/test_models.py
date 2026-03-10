@@ -80,11 +80,12 @@ class TestFusionModule:
         assert seq.shape == (4, 197, 768)
 
     def test_parameter_count(self):
-        """Fusion should have ~4.7M params."""
+        """Fusion module has substantial parameters (2 layers × dual-stream)."""
         fusion = FusionModule(dim=768, num_heads=12, num_layers=2)
         count = sum(p.numel() for p in fusion.parameters())
-        assert count > 4_000_000
-        assert count < 6_000_000
+        # 2 layers × (2 cross-attn + 2 FFN with 4x expansion) ≈ 28M
+        assert count > 20_000_000
+        assert count < 35_000_000
 
 
 class TestConfidenceGate:
