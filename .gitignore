@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+env/
+.env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data (large files)
+data/train2014/
+data/val2014/
+data/*.zip
+
+# Checkpoints (large files)
+checkpoints/**/*.pt
+
+# Results
+results/*.json
+results/ttt_predictions/
+results/ablation/
+
+# Figures (generated)
+figures/*.png
+figures/*.pdf
+
+# Jupyter
+.ipynb_checkpoints/

@@ -1,0 +1,53 @@
+# === Model ===
+vision_encoder: "google/vit-base-patch16-224"   # Frozen
+text_encoder: "bert-base-uncased"                # Frozen
+fusion_layers: 2                                 # Cross-modal transformer layers
+fusion_dim: 768
+fusion_heads: 12
+fusion_dropout: 0.1
+prediction_hidden: 1024
+num_answers: 3129                                # VQA-v2 answer vocabulary size
+
+# === Gate ===
+gate_hidden: 256
+gate_threshold_sweep: [0.5, 0.7, 0.8, 0.9, 0.95]
+
+# === TTT ===
+ttt_objectives: ["masked_patch", "rotation"]     # Ablate both
+ttt_k_steps_sweep: [0, 1, 2, 3, 5]              # 0 = no TTT (baseline)
+ttt_lr: 1.0e-4                                   # TTT inner learning rate
+ttt_mask_ratio: 0.25                             # For masked patch prediction
+ttt_adapt_modules: ["fusion", "prediction_head"] # Which modules get TTT gradients
+
+# === TTT Stabilization ===
+consistency_weight: 0.1                          # λ_cons for consistency regularization
+consistency_augmentations: ["random_crop", "color_jitter"]
+mixup_alpha_range: [0.7, 1.0]                   # Mixup anchoring interpolation range
+
+# === Training (Base VQA) ===
+train_batch_size: 64
+train_lr: 1.0e-4
+train_epochs: 15
+train_optimizer: "adamw"
+train_weight_decay: 0.01
+train_scheduler: "cosine"
+train_warmup_ratio: 0.1
+gradient_checkpointing: true                     # For T4 memory
+
+# === Training (Gate) ===
+gate_batch_size: 128
+gate_lr: 5.0e-4
+gate_epochs: 5
+
+# === Data ===
+dataset: "vqa_v2"                                # or "vizwiz"
+image_size: 224
+max_question_length: 20                          # BERT tokenizer max length
+train_split: "train"
+val_split: "val"
+data_dir: "data/"
+
+# === Paths ===
+checkpoint_dir: "checkpoints/"
+results_dir: "results/"
+figures_dir: "figures/"
