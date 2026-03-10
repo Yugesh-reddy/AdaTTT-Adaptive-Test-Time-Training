@@ -99,7 +99,10 @@ class TestRotationLoss:
 
         NOTE: This test requires model.vit to be available for re-encoding rotated images.
         We mock the ViT with a simple module for testing.
+        Requires torchvision for rotation transforms.
         """
+        pytest.importorskip("torchvision")
+
         model, images, visual, text, text_mask = model_and_tensors
 
         # Mock ViT for testing (avoids HuggingFace download)
