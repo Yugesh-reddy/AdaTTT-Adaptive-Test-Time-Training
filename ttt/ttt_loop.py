@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchvision.transforms.functional as TF
+# torchvision imported lazily inside methods that need it
 
 
 class TTTAdapter:
@@ -234,6 +234,7 @@ class TTTAdapter:
         angle = rotations[rotation_idx]
 
         # Apply rotation
+        import torchvision.transforms.functional as TF
         rotated_images = TF.rotate(images, angle)
 
         # Re-encode through frozen ViT (no grad through ViT)
