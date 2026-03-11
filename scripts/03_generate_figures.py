@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Generate 6 publication-quality figures. No GPU needed.
+Generate 7 publication-quality figures. No GPU needed.
 
 Usage:
     python scripts/03_generate_figures.py --config config/config.yaml
@@ -13,6 +13,7 @@ Figures:
     4. Per-Question-Type Breakdown (grouped bars)
     5. TTT Stabilization Ablation (bar chart)
     6. Confidence Distribution (histogram for correct vs incorrect)
+    7. Memotion2 Cross-Task Generalization (VQA-v2 vs Memotion2 bar chart)
 """
 
 import argparse
@@ -296,6 +297,95 @@ def fig6_confidence_distribution(results_dir: str, output_dir: str):
     print(f"  ✅ {path}")
 
 
+def fig7_cross_task_generalization(results_dir: str, vqa_results: List[Dict], output_dir: str):
+    """Figure 7: Cross-task generalization — VQA-v2 vs Memotion2."""
+    memotion2_dir = os.path.join(results_dir, "memotion2")
+    if not os.path.exists(memotion2_dir):
+        print("  [skip] No Memotion2 results found")
+        return
+
+    memo_files = glob.glob(os.path.join(memotion2_dir, "*.json"))
+    if not memo_files:
+        print("  [skip] No Memotion2 result files")
+        return
+
+    # Compute Memotion2 accuracies
+    memo_accs = {"base": None, "ttt": None, "adaptive": None}
+    for mf in memo_files:
+        basename = os.path.basename(mf)
+        data = load_json(mf)
+        preds = [d["prediction"] for d in data]
+        gts = [d["ground_truth"] for d in data]
+        acc = sum(p == g for p, g in zip(preds, gts)) / len(preds) * 100 if preds else 0
+
+        if "k0" in basename or "baseline" in basename:
+            memo_accs["base"] = acc
+        elif "adaptive" in basename:
+            memo_accs["adaptive"] = acc
+        else:
+            memo_accs["ttt"] = acc
+
+    # Extract VQA accuracies from analysis summary
+    vqa_accs = {"base": None, "ttt": None, "adaptive": None}
+    for r in vqa_results:
+        config = r.get("config", "")
+        acc = r["accuracy"] * 100
+        if "K=0" in config:
+            vqa_accs["base"] = acc
+        elif "Adaptive" in config and vqa_accs["adaptive"] is None:
+            vqa_accs["adaptive"] = acc
+        elif vqa_accs["ttt"] is None:
+            vqa_accs["ttt"] = acc
+
+    # Build figure
+    fig, ax = plt.subplots(figsize=(9, 6))
+
+    categories = []
+    vqa_vals = []
+    memo_vals = []
+    labels = [("base", "Base (No TTT)"), ("ttt", "TTT"), ("adaptive", "Adaptive TTT")]
+
+    for key, label in labels:
+        if vqa_accs[key] is not None or memo_accs[key] is not None:
+            categories.append(label)
+            vqa_vals.append(vqa_accs[key] or 0)
+            memo_vals.append(memo_accs[key] or 0)
+
+    if not categories:
+        print("  [skip] Insufficient data for cross-task comparison")
+        plt.close(fig)
+        return
+
+    x = np.arange(len(categories))
+    width = 0.35
+
+    bars1 = ax.bar(x - width / 2, vqa_vals, width, label="VQA-v2",
+                   color="#2196F3", alpha=0.85)
+    bars2 = ax.bar(x + width / 2, memo_vals, width, label="Memotion2",
+                   color="#FF9800", alpha=0.85)
+
+    # Value labels
+    for bars in [bars1, bars2]:
+        for bar in bars:
+            if bar.get_height() > 0:
+                ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.3,
+                        f"{bar.get_height():.1f}%", ha="center", va="bottom",
+                        fontsize=9, fontweight="bold")
+
+    ax.set_xlabel("Configuration")
+    ax.set_ylabel("Accuracy (%)")
+    ax.set_title("Cross-Task Generalization: VQA-v2 vs Memotion2")
+    ax.set_xticks(x)
+    ax.set_xticklabels(categories)
+    ax.legend()
+    ax.grid(True, alpha=0.2, axis="y")
+
+    path = os.path.join(output_dir, "fig7_cross_task_generalization.png")
+    fig.savefig(path)
+    plt.close(fig)
+    print(f"  ✅ {path}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate publication figures")
     parser.add_argument("--config", type=str, default="config/config.yaml")
@@ -336,6 +426,9 @@ def main():
 
     print("\n📈 Figure 6: Confidence Distribution")
     fig6_confidence_distribution(results_dir, output_dir)
+
+    print("\n📈 Figure 7: Cross-Task Generalization (VQA-v2 vs Memotion2)")
+    fig7_cross_task_generalization(results_dir, results, output_dir)
 
     print(f"\n✅ All figures saved to: {output_dir}/")
 
