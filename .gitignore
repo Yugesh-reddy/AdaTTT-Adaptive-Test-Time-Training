@@ -41,3 +41,9 @@ figures/*.pdf
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Project docs (keep local only)
+CLAUDE.md
+
+# Memotion2 results
+results/memotion2/
