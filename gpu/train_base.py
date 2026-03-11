@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 """
-Train the base VQA model (fusion + gate + prediction head) on VQA-v2 or VizWiz.
+Train the base VQA model (fusion + gate + prediction head) on VQA-v2, VizWiz, or Memotion2.
 
 Standard supervised training with cross-entropy loss. No TTT during training.
+For Memotion2 cross-task evaluation, the same frozen encoders and fusion module
+are reused — only the prediction head (θ_d) changes (num_answers → num_classes).
 
 Usage on Colab:
     !python gpu/train_base.py --config config/config.yaml --epochs 15
+    !python gpu/train_base.py --config config/config.yaml --dataset memotion2
 
 What this trains:
     - θ_f (FusionModule): cross-modal attention
     - θ_g (ConfidenceGate): auxiliary confidence predictor
-    - θ_d (PredictionHead): answer classifier
+    - θ_d (PredictionHead): answer/sentiment classifier
 
 Loss: L = L_vqa + 0.1 * L_gate
     L_vqa  = CrossEntropy(logits, answer_idx)
@@ -29,7 +32,10 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from ttt.models import FullVQAModel
-from ttt.data import VQADataset, vqa_collate_fn, load_answer_vocab
+from ttt.data import (
+    VQADataset, Memotion2Dataset, vqa_collate_fn,
+    load_answer_vocab, build_memotion2_label_map,
+)
 from ttt.utils import (
     load_config,
     save_checkpoint,
@@ -79,12 +85,22 @@ def main():
     parser = argparse.ArgumentParser(description="Train base VQA model")
     parser.add_argument("--config", type=str, default="config/config.yaml")
     parser.add_argument("--epochs", type=int, default=None)
+    parser.add_argument("--dataset", type=str, default=None,
+                        help="Dataset: vqa_v2, vizwiz, or memotion2 (overrides config)")
     parser.add_argument("--resume", type=str, default=None, help="Resume from checkpoint")
     args = parser.parse_args()
 
     config = load_config(args.config)
     device = get_device()
     logger = setup_logging("logs")
+
+    # Determine dataset
+    dataset_name = args.dataset or config.get("dataset", "vqa_v2")
+    is_memotion2 = dataset_name == "memotion2"
+
+    # Override num_answers for Memotion2
+    if is_memotion2:
+        config["num_answers"] = config.get("memotion2_num_classes", 3)
 
     # Override config with CLI args
     epochs = args.epochs or config.get("train_epochs", 15)
@@ -95,12 +111,8 @@ def main():
     data_dir = config.get("data_dir", "data/")
 
     logger.info(f"Device: {device}")
+    logger.info(f"Dataset: {dataset_name}")
     logger.info(f"Epochs: {epochs}, Batch size: {batch_size}, LR: {lr}")
-
-    # Load answer vocabulary
-    vocab_path = os.path.join(data_dir, "answer_vocab.json")
-    answer_vocab = load_answer_vocab(vocab_path)
-    logger.info(f"Answer vocab size: {len(answer_vocab)}")
 
     # Create model
     model = FullVQAModel(config)
@@ -118,24 +130,44 @@ def main():
         logger.info("Gradient checkpointing enabled")
 
     # Create datasets
-    train_dataset = VQADataset(
-        questions_path=os.path.join(data_dir, "v2_OpenEnded_mscoco_train2014_questions.json"),
-        annotations_path=os.path.join(data_dir, "v2_mscoco_train2014_annotations.json"),
-        image_dir=os.path.join(data_dir, "train2014"),
-        answer_vocab=answer_vocab,
-        max_question_length=config.get("max_question_length", 20),
-        image_size=config.get("image_size", 224),
-        split="train",
-    )
-    val_dataset = VQADataset(
-        questions_path=os.path.join(data_dir, "v2_OpenEnded_mscoco_val2014_questions.json"),
-        annotations_path=os.path.join(data_dir, "v2_mscoco_val2014_annotations.json"),
-        image_dir=os.path.join(data_dir, "val2014"),
-        answer_vocab=answer_vocab,
-        max_question_length=config.get("max_question_length", 20),
-        image_size=config.get("image_size", 224),
-        split="val",
-    )
+    if is_memotion2:
+        memo_dir = config.get("memotion2_data_dir", os.path.join(data_dir, "memotion2"))
+        train_dataset = Memotion2Dataset(
+            annotations_path=os.path.join(memo_dir, "train.json"),
+            image_dir=os.path.join(memo_dir, "images"),
+            max_question_length=config.get("max_question_length", 20),
+            image_size=config.get("image_size", 224),
+        )
+        val_dataset = Memotion2Dataset(
+            annotations_path=os.path.join(memo_dir, "val.json"),
+            image_dir=os.path.join(memo_dir, "images"),
+            max_question_length=config.get("max_question_length", 20),
+            image_size=config.get("image_size", 224),
+        )
+    else:
+        # Load answer vocabulary for VQA
+        vocab_path = os.path.join(data_dir, "answer_vocab.json")
+        answer_vocab = load_answer_vocab(vocab_path)
+        logger.info(f"Answer vocab size: {len(answer_vocab)}")
+
+        train_dataset = VQADataset(
+            questions_path=os.path.join(data_dir, "v2_OpenEnded_mscoco_train2014_questions.json"),
+            annotations_path=os.path.join(data_dir, "v2_mscoco_train2014_annotations.json"),
+            image_dir=os.path.join(data_dir, "train2014"),
+            answer_vocab=answer_vocab,
+            max_question_length=config.get("max_question_length", 20),
+            image_size=config.get("image_size", 224),
+            split="train",
+        )
+        val_dataset = VQADataset(
+            questions_path=os.path.join(data_dir, "v2_OpenEnded_mscoco_val2014_questions.json"),
+            annotations_path=os.path.join(data_dir, "v2_mscoco_val2014_annotations.json"),
+            image_dir=os.path.join(data_dir, "val2014"),
+            answer_vocab=answer_vocab,
+            max_question_length=config.get("max_question_length", 20),
+            image_size=config.get("image_size", 224),
+            split="val",
+        )
 
     logger.info(f"Train samples: {len(train_dataset)}")
     logger.info(f"Val samples: {len(val_dataset)}")
