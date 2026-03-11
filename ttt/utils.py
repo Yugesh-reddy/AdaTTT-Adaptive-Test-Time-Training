@@ -74,6 +74,8 @@ def save_checkpoint(
         "fusion": model.fusion.state_dict(),
         "gate": model.gate.state_dict(),
         "prediction_head": model.prediction_head.state_dict(),
+        "mask_proj": model.mask_proj.state_dict(),
+        "rotation_head": model.rotation_head.state_dict(),
         "epoch": epoch,
     }
     if optimizer is not None:
@@ -104,6 +106,10 @@ def load_checkpoint(
     model.fusion.load_state_dict(checkpoint["fusion"])
     model.gate.load_state_dict(checkpoint["gate"])
     model.prediction_head.load_state_dict(checkpoint["prediction_head"])
+    if "mask_proj" in checkpoint:
+        model.mask_proj.load_state_dict(checkpoint["mask_proj"])
+    if "rotation_head" in checkpoint:
+        model.rotation_head.load_state_dict(checkpoint["rotation_head"])
 
     if load_optimizer and optimizer is not None and "optimizer" in checkpoint:
         optimizer.load_state_dict(checkpoint["optimizer"])
