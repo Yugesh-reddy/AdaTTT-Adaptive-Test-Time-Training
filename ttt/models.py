@@ -400,6 +400,9 @@ class FullVQAModel(nn.Module):
         self.mask_proj = MaskedPatchProjection(dim)
         self.rotation_head = RotationHead(dim)
 
+        # Modules that are allowed to adapt during TTT.
+        self.ttt_adapt_modules = config.get("ttt_adapt_modules", ["fusion", "prediction_head"])
+
     def load_encoders(self, config: Dict) -> None:
         """Load frozen ViT and BERT encoders.
 
@@ -481,18 +484,69 @@ class FullVQAModel(nn.Module):
         logits = self.prediction_head(z)
         return logits, z
 
-    def get_ttt_params(self) -> List[torch.nn.Parameter]:
-        """Get parameters that TTT can update: fusion + prediction_head.
+    def _resolve_ttt_modules(
+        self,
+        adapt_modules: Optional[List[str]] = None,
+        include_auxiliary: bool = False,
+    ) -> List[Tuple[str, nn.Module]]:
+        """Resolve named modules used by TTT.
 
-        The gate is NOT adapted at test time.
+        Args:
+            adapt_modules: Module names to adapt. If None, uses self.ttt_adapt_modules.
+            include_auxiliary: Include objective-specific auxiliary heads in valid names.
+
+        Returns:
+            List of (module_name, module) tuples in the requested order.
         """
-        return list(self.fusion.parameters()) + list(self.prediction_head.parameters())
+        requested = adapt_modules if adapt_modules is not None else self.ttt_adapt_modules
+        if requested is None:
+            requested = []
 
-    def get_ttt_params_named(self) -> List[Tuple[str, torch.nn.Parameter]]:
+        registry: Dict[str, nn.Module] = {
+            "fusion": self.fusion,
+            "prediction_head": self.prediction_head,
+            "gate": self.gate,
+        }
+        if include_auxiliary:
+            registry["mask_proj"] = self.mask_proj
+            registry["rotation_head"] = self.rotation_head
+
+        modules: List[Tuple[str, nn.Module]] = []
+        seen = set()
+        for name in requested:
+            if name in seen:
+                continue
+            if name not in registry:
+                valid = ", ".join(sorted(registry.keys()))
+                raise ValueError(f"Unknown TTT module '{name}'. Valid modules: {valid}")
+            modules.append((name, registry[name]))
+            seen.add(name)
+        return modules
+
+    def get_ttt_params(
+        self,
+        adapt_modules: Optional[List[str]] = None,
+        include_auxiliary: bool = False,
+    ) -> List[torch.nn.Parameter]:
+        """Get parameters that TTT can update.
+
+        Args:
+            adapt_modules: Optional explicit module names to adapt.
+            include_auxiliary: Whether auxiliary TTT heads are valid module names.
+        """
+        params: List[torch.nn.Parameter] = []
+        for _, module in self._resolve_ttt_modules(adapt_modules, include_auxiliary):
+            params.extend(list(module.parameters()))
+        return params
+
+    def get_ttt_params_named(
+        self,
+        adapt_modules: Optional[List[str]] = None,
+        include_auxiliary: bool = False,
+    ) -> List[Tuple[str, torch.nn.Parameter]]:
         """Get named parameters for TTT (for save/restore)."""
-        params = []
-        for name, param in self.fusion.named_parameters():
-            params.append((f"fusion.{name}", param))
-        for name, param in self.prediction_head.named_parameters():
-            params.append((f"prediction_head.{name}", param))
+        params: List[Tuple[str, torch.nn.Parameter]] = []
+        for module_name, module in self._resolve_ttt_modules(adapt_modules, include_auxiliary):
+            for name, param in module.named_parameters():
+                params.append((f"{module_name}.{name}", param))
         return params
