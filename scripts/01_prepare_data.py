@@ -58,7 +58,9 @@ def main():
             print("=" * 60)
             print("Step 1: Downloading VQA-v2 questions and annotations")
             print("=" * 60)
-            download_vqa_v2(data_dir)
+            download_vqa_v2(data_dir, include_image_instructions=not args.skip_images)
+            if args.skip_images:
+                print("  [info] Skipped image download instructions (--skip-images enabled)")
 
         # Step 2: Build answer vocabulary from training annotations
         train_ann_path = os.path.join(data_dir, "v2_mscoco_train2014_annotations.json")
