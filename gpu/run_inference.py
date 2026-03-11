@@ -38,7 +38,10 @@ from tqdm import tqdm
 from ttt.models import FullVQAModel
 from ttt.ttt_loop import TTTAdapter
 from ttt.gate import AdaptiveRouter
-from ttt.data import VQADataset, vqa_collate_fn, load_answer_vocab
+from ttt.data import (
+    VQADataset, Memotion2Dataset, vqa_collate_fn,
+    load_answer_vocab, build_memotion2_label_map,
+)
 from ttt.metrics import vqa_accuracy, compute_gate_statistics
 from ttt.utils import (
     load_config,
@@ -60,6 +63,8 @@ def main():
     parser.add_argument("--objective", type=str, default="masked_patch",
                         choices=["masked_patch", "rotation"])
     parser.add_argument("--batch-size", type=int, default=1)
+    parser.add_argument("--dataset", type=str, default=None,
+                        help="Dataset: vqa_v2, vizwiz, or memotion2 (overrides config)")
     parser.add_argument("--max-samples", type=int, default=None)
     args = parser.parse_args()
 
@@ -71,8 +76,14 @@ def main():
     k = args.k
     objective = args.objective
     data_dir = config.get("data_dir", "data/")
+    dataset_name = args.dataset or config.get("dataset", "vqa_v2")
+    is_memotion2 = dataset_name == "memotion2"
 
-    logger.info(f"Adaptive Inference: τ={threshold}, K={k}, {objective}")
+    # Override num_answers for Memotion2
+    if is_memotion2:
+        config["num_answers"] = config.get("memotion2_num_classes", 3)
+
+    logger.info(f"Adaptive Inference: τ={threshold}, K={k}, {objective}, dataset={dataset_name}")
     logger.info(f"Device: {device}")
 
     # Load model
@@ -94,16 +105,25 @@ def main():
     router = AdaptiveRouter(model, ttt_adapter, threshold=threshold)
 
     # Load dataset
-    answer_vocab = load_answer_vocab(os.path.join(data_dir, "answer_vocab.json"))
-    val_dataset = VQADataset(
-        questions_path=os.path.join(data_dir, "v2_OpenEnded_mscoco_val2014_questions.json"),
-        annotations_path=os.path.join(data_dir, "v2_mscoco_val2014_annotations.json"),
-        image_dir=os.path.join(data_dir, "val2014"),
-        answer_vocab=answer_vocab,
-        max_question_length=config.get("max_question_length", 20),
-        image_size=config.get("image_size", 224),
-        split="val",
-    )
+    if is_memotion2:
+        memo_dir = config.get("memotion2_data_dir", os.path.join(data_dir, "memotion2"))
+        val_dataset = Memotion2Dataset(
+            annotations_path=os.path.join(memo_dir, "val.json"),
+            image_dir=os.path.join(memo_dir, "images"),
+            max_question_length=config.get("max_question_length", 20),
+            image_size=config.get("image_size", 224),
+        )
+    else:
+        answer_vocab = load_answer_vocab(os.path.join(data_dir, "answer_vocab.json"))
+        val_dataset = VQADataset(
+            questions_path=os.path.join(data_dir, "v2_OpenEnded_mscoco_val2014_questions.json"),
+            annotations_path=os.path.join(data_dir, "v2_mscoco_val2014_annotations.json"),
+            image_dir=os.path.join(data_dir, "val2014"),
+            answer_vocab=answer_vocab,
+            max_question_length=config.get("max_question_length", 20),
+            image_size=config.get("image_size", 224),
+            split="val",
+        )
 
     if args.max_samples:
         val_dataset.samples = val_dataset.samples[:args.max_samples]
@@ -170,9 +190,12 @@ def main():
 
     # Save results
     results_dir = config.get("results_dir", "results/")
+    if is_memotion2:
+        results_dir = os.path.join(results_dir, "memotion2")
     os.makedirs(results_dir, exist_ok=True)
 
-    filename = f"adaptive_t{threshold}_k{k}_{objective}.json"
+    prefix = "memotion2_" if is_memotion2 else ""
+    filename = f"{prefix}adaptive_t{threshold}_k{k}_{objective}.json"
     save_path = os.path.join(results_dir, filename)
     save_json(all_predictions, save_path)
     logger.info(f"  Saved: {save_path}")

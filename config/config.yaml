@@ -40,12 +40,16 @@ gate_lr: 5.0e-4
 gate_epochs: 5
 
 # === Data ===
-dataset: "vqa_v2"                                # or "vizwiz"
+dataset: "vqa_v2"                                # or "vizwiz" or "memotion2"
 image_size: 224
 max_question_length: 20                          # BERT tokenizer max length
 train_split: "train"
 val_split: "val"
 data_dir: "data/"
+
+# === Memotion2 (cross-task evaluation) ===
+memotion2_num_classes: 3                         # positive / negative / neutral
+memotion2_data_dir: "data/memotion2/"
 
 # === Paths ===
 checkpoint_dir: "checkpoints/"

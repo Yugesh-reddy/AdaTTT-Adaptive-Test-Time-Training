@@ -17,7 +17,7 @@ from ttt.models import (
 )
 from ttt.ttt_loop import TTTAdapter
 from ttt.gate import AdaptiveRouter
-from ttt.data import VQADataset, VizWizDataset
+from ttt.data import VQADataset, VizWizDataset, Memotion2Dataset, build_memotion2_label_map
 from ttt.metrics import (
     vqa_accuracy,
     accuracy_by_question_type,

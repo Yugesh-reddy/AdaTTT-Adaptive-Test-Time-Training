@@ -1,10 +1,11 @@
 """
-Dataset classes for VQA-v2 and VizWiz.
+Dataset classes for VQA-v2, VizWiz, and Memotion2.
 
 Handles:
 - Image preprocessing (resize 224×224, ImageNet normalization)
-- Question tokenization (BERT WordPiece, pad/truncate to max_question_length)
-- Answer vocabulary construction (top 3129 answers)
+- Question/text tokenization (BERT WordPiece, pad/truncate to max_question_length)
+- Answer vocabulary construction (top 3129 answers for VQA)
+- Memotion2 sentiment label mapping (positive/negative/neutral)
 - Data download utilities
 """
 
@@ -431,4 +432,174 @@ def download_vqa_v2(data_dir: str) -> None:
     print(f"  train2014: http://images.cocodataset.org/zips/train2014.zip (~13GB)")
     print(f"  val2014:   http://images.cocodataset.org/zips/val2014.zip (~6GB)")
     print(f"  Extract to: {data_dir}")
+    print("=" * 60)
+
+
+# ---------------------------------------------------------------------------
+# Memotion2 label map
+# ---------------------------------------------------------------------------
+
+def build_memotion2_label_map() -> Dict[str, int]:
+    """Build label mapping for Memotion2 sentiment classification.
+
+    Returns:
+        Dict mapping sentiment string → class index.
+    """
+    return {
+        "positive": 0,
+        "negative": 1,
+        "neutral": 2,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Memotion2 Dataset
+# ---------------------------------------------------------------------------
+
+class Memotion2Dataset(Dataset):
+    """Memotion2 meme sentiment dataset for cross-task evaluation.
+
+    Loads meme images + OCR-extracted text with sentiment labels.
+    Returns the same dict format as VQADataset for compatibility
+    with existing collate functions and GPU scripts.
+
+    __getitem__ returns:
+        image: torch.Tensor (3, 224, 224) — meme image preprocessed for ViT
+        input_ids: torch.Tensor (max_question_length,) — BERT tokenized OCR text
+        attention_mask: torch.Tensor (max_question_length,)
+        answer_idx: int — sentiment class index (positive=0, negative=1, neutral=2)
+        question_type: str — always "sentiment" (for analysis compatibility)
+        sample_id: str — unique identifier
+    """
+
+    def __init__(
+        self,
+        annotations_path: str,
+        image_dir: str,
+        label_map: Optional[Dict[str, int]] = None,
+        tokenizer: Any = None,
+        max_question_length: int = 20,
+        image_size: int = 224,
+    ):
+        """
+        Args:
+            annotations_path: Path to Memotion2 annotations JSON file.
+                Expected format: list of dicts with keys:
+                    "image": filename, "text": OCR text, "sentiment": label string
+            image_dir: Directory containing meme images.
+            label_map: Dict mapping sentiment string → index.
+                If None, uses default (positive=0, negative=1, neutral=2).
+            tokenizer: BERT tokenizer instance. If None, loaded from HuggingFace.
+            max_question_length: Max tokens for OCR text.
+            image_size: Image resize dimension.
+        """
+        self.image_dir = image_dir
+        self.label_map = label_map or build_memotion2_label_map()
+        self.max_question_length = max_question_length
+        self.image_size = image_size
+        self.transform = get_image_transform(image_size)
+
+        if tokenizer is None:
+            from transformers import BertTokenizer
+            self.tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+        else:
+            self.tokenizer = tokenizer
+
+        # Load annotations
+        with open(annotations_path, "r") as f:
+            annotations = json.load(f)
+
+        self.samples = []
+        for idx, ann in enumerate(annotations):
+            # Get sentiment label
+            sentiment = ann.get("sentiment", "neutral").lower().strip()
+            label_idx = self.label_map.get(sentiment, self.label_map.get("neutral", 2))
+
+            # Get OCR text (used as the "question" input to BERT)
+            text = ann.get("text", ann.get("ocr_text", ""))
+
+            # Image path
+            image_filename = ann.get("image", ann.get("image_name", ""))
+            image_path = os.path.join(image_dir, image_filename)
+
+            self.samples.append({
+                "image_path": image_path,
+                "question": text,  # OCR text treated as "question" for BERT
+                "answer_idx": label_idx,
+                "question_type": "sentiment",
+                "sample_id": str(ann.get("id", idx)),
+            })
+
+    def __len__(self) -> int:
+        return len(self.samples)
+
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        sample = self.samples[idx]
+
+        # Load and preprocess meme image
+        try:
+            image = Image.open(sample["image_path"]).convert("RGB")
+            image = self.transform(image)
+        except (FileNotFoundError, OSError):
+            image = torch.zeros(3, self.image_size, self.image_size)
+
+        # Tokenize OCR text
+        encoding = self.tokenizer(
+            sample["question"],
+            max_length=self.max_question_length,
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt",
+        )
+        input_ids = encoding["input_ids"].squeeze(0)
+        attention_mask = encoding["attention_mask"].squeeze(0)
+
+        return {
+            "image": image,
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "answer_idx": sample["answer_idx"],
+            "question_type": sample["question_type"],
+            "sample_id": sample["sample_id"],
+        }
+
+
+# ---------------------------------------------------------------------------
+# Memotion2 download utility
+# ---------------------------------------------------------------------------
+
+def download_memotion2(data_dir: str) -> None:
+    """Download Memotion2 data files.
+
+    Memotion2 is from SemEval-2020 Task 8. Available via HuggingFace
+    datasets or the official SemEval-2020 release.
+
+    The dataset contains meme images with OCR-extracted text annotations
+    and sentiment/humor/sarcasm labels. For AdaTTT we use sentiment
+    classification (positive / negative / neutral) as the primary task.
+
+    Args:
+        data_dir: Root directory for data storage.
+    """
+    memotion_dir = os.path.join(data_dir, "memotion2")
+    os.makedirs(memotion_dir, exist_ok=True)
+
+    print("=" * 60)
+    print("MEMOTION2 DOWNLOAD INSTRUCTIONS")
+    print("=" * 60)
+    print("Option 1 — HuggingFace:")
+    print("  pip install datasets")
+    print("  from datasets import load_dataset")
+    print('  ds = load_dataset("mediaeval/memotion2")')
+    print()
+    print("Option 2 — SemEval-2020 official release:")
+    print("  https://competitions.codalab.org/competitions/35688")
+    print()
+    print("After downloading, organize files as:")
+    print(f"  {memotion_dir}/images/        — meme images")
+    print(f"  {memotion_dir}/train.json     — training annotations")
+    print(f"  {memotion_dir}/val.json       — validation annotations")
+    print()
+    print("Annotation JSON format (list of dicts):")
+    print('  [{"image": "img_001.jpg", "text": "OCR text", "sentiment": "positive"}, ...]')
     print("=" * 60)

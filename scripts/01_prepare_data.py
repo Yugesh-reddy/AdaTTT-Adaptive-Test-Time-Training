@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Download and preprocess VQA-v2 / VizWiz dataset.
+Download and preprocess VQA-v2 / VizWiz / Memotion2 dataset.
 
 Usage (LOCAL — no GPU needed):
     python scripts/01_prepare_data.py --config config/config.yaml
     python scripts/01_prepare_data.py --config config/config.yaml --dataset vizwiz
+    python scripts/01_prepare_data.py --config config/config.yaml --dataset memotion2
 """
 
 import argparse
@@ -15,7 +16,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from ttt.utils import load_config
-from ttt.data import download_vqa_v2, build_answer_vocab
+from ttt.data import download_vqa_v2, download_memotion2, build_answer_vocab
 
 
 def main():
@@ -27,7 +28,7 @@ def main():
         "--dataset",
         type=str,
         default=None,
-        help="Dataset to download (vqa_v2 or vizwiz). Defaults to config value.",
+        help="Dataset to download (vqa_v2, vizwiz, or memotion2). Defaults to config value.",
     )
     parser.add_argument(
         "--skip-images",
@@ -102,6 +103,29 @@ def main():
         print(f"Extract images and annotations to: {data_dir}/vizwiz/")
 
         os.makedirs(os.path.join(data_dir, "vizwiz"), exist_ok=True)
+
+    elif dataset == "memotion2":
+        # Step 1: Download instructions
+        print("=" * 60)
+        print("Step 1: Memotion2 dataset setup")
+        print("=" * 60)
+        download_memotion2(data_dir)
+
+        # Step 2: Create directory structure
+        print("\n" + "=" * 60)
+        print("Step 2: Creating directory structure")
+        print("=" * 60)
+        memo_dir = config.get("memotion2_data_dir", os.path.join(data_dir, "memotion2"))
+        for subdir in [
+            os.path.join(memo_dir, "images"),
+            "checkpoints/base",
+            "checkpoints/gate",
+            "results/memotion2",
+            "figures",
+        ]:
+            os.makedirs(subdir, exist_ok=True)
+            print(f"  Created: {subdir}/")
+
     else:
         print(f"Unknown dataset: {dataset}")
         sys.exit(1)

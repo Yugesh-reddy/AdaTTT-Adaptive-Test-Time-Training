@@ -181,3 +181,21 @@ class TestFullVQAModel:
         mask = torch.ones(2, 20, dtype=torch.long)
         with pytest.raises(AssertionError, match="load_encoders"):
             model.encode(images, ids, mask)
+
+    def test_memotion2_num_answers(self, batch_tensors):
+        """Model works with Memotion2's num_answers=3 (sentiment classes)."""
+        memo_config = {
+            "fusion_dim": 768,
+            "fusion_heads": 12,
+            "fusion_layers": 2,
+            "fusion_dropout": 0.1,
+            "prediction_hidden": 1024,
+            "num_answers": 3,  # Memotion2: positive/negative/neutral
+            "gate_hidden": 256,
+        }
+        model = FullVQAModel(memo_config)
+        logits, z = model.fuse_and_predict(
+            batch_tensors["visual"], batch_tensors["text"], batch_tensors["text_mask"]
+        )
+        assert logits.shape == (4, 3)
+        assert z.shape == (4, 768)

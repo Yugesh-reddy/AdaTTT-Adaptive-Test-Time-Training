@@ -206,6 +206,39 @@ def main():
     summary = {"results": all_results}
     if all_results:
         summary["pareto_frontier"] = pareto_frontier(all_results)
+
+    # 6. Memotion2 cross-task results
+    memotion2_dir = os.path.join(results_dir, "memotion2")
+    memotion2_results = []
+    if os.path.exists(memotion2_dir):
+        memo_files = sorted(glob.glob(os.path.join(memotion2_dir, "*.json")))
+        if memo_files:
+            print(f"\n{'='*70}")
+            print(f"  Memotion2 Cross-Task Evaluation")
+            print(f"{'='*70}")
+
+        for mf in memo_files:
+            file_config = parse_config_from_filename(mf)
+            memo_data = load_json(mf)
+            preds = [d["prediction"] for d in memo_data]
+            gts = [d["ground_truth"] for d in memo_data]
+
+            acc = vqa_accuracy(preds, gts)
+            k = file_config.get("k", 0)
+            objective = file_config.get("objective", "unknown")
+
+            print(f"\n📊 Memotion2: K={k}, {objective}")
+            print(f"   Accuracy: {acc*100:.2f}%")
+            print(f"   Samples: {len(memo_data)}")
+
+            memotion2_results.append({
+                "config": f"Memotion2 K={k}, {objective}",
+                "accuracy": acc,
+                "num_samples": len(memo_data),
+            })
+
+        summary["memotion2_results"] = memotion2_results
+
     summary_path = os.path.join(results_dir, "analysis_summary.json")
     os.makedirs(results_dir, exist_ok=True)
     save_json(summary, summary_path)
