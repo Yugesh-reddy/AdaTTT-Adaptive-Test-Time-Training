@@ -97,15 +97,15 @@ def main():
         # 0.0 (APPLY TTT) if TTT helps
         # 1.0 if TTT hurts (protect base prediction)
         # 0.5 if neither helps (uncertain)
-        if base_correct:
+        if ttt_hurts:
+            gate_label = 1.0
+            stats["ttt_hurts"] += 1
+        elif base_correct:
             gate_label = 1.0
             stats["base_correct"] += 1
         elif ttt_helps:
             gate_label = 0.0
             stats["ttt_helps"] += 1
-        elif ttt_hurts:
-            gate_label = 1.0
-            stats["ttt_hurts"] += 1
         else:
             gate_label = 0.5
             stats["neither"] += 1

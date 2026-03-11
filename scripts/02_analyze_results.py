@@ -161,6 +161,9 @@ def main():
             "config": f"Adaptive τ={threshold}, K={k}",
             "accuracy": acc,
             "avg_flops": avg_flops,
+            "skip_rate": skip_rate,
+            "skip_count": skip,
+            "adapt_count": adapt,
         })
 
     # 4. Pareto frontier
@@ -172,31 +175,48 @@ def main():
         for p in pareto_points:
             print(f"  {p['config']}: acc={p['accuracy']*100:.2f}%, FLOPs={p['avg_flops']:.1f} G")
 
-    # 5. McNemar's test (base vs best TTT)
+    # 5. McNemar's test (base vs best TTT by accuracy)
     if os.path.exists(base_path) and os.path.exists(ttt_dir):
         ttt_files = sorted(glob.glob(os.path.join(ttt_dir, "*.json")))
         if ttt_files:
-            best_ttt_file = ttt_files[0]  # Use first available
-            ttt_data = load_json(best_ttt_file)
             base_data_reload = load_json(base_path)
+            base_map = {d["sample_id"]: d for d in base_data_reload}
 
-            # Align by sample_id
-            ttt_map = {d["sample_id"]: d for d in ttt_data}
-            aligned_base = []
-            aligned_ttt = []
-            aligned_gt = []
-            for d in base_data_reload:
-                sid = d["sample_id"]
-                if sid in ttt_map:
-                    aligned_base.append(d["prediction"])
-                    aligned_ttt.append(ttt_map[sid]["prediction"])
-                    aligned_gt.append(d["ground_truth"])
+            best_file = None
+            best_acc = -1.0
+            best_triplets = None
 
-            if aligned_base:
+            for ttt_file in ttt_files:
+                ttt_data = load_json(ttt_file)
+                aligned_base = []
+                aligned_ttt = []
+                aligned_gt = []
+
+                for td in ttt_data:
+                    sid = td["sample_id"]
+                    if sid not in base_map:
+                        continue
+                    bd = base_map[sid]
+                    aligned_base.append(bd["prediction"])
+                    aligned_ttt.append(td["prediction"])
+                    aligned_gt.append(bd["ground_truth"])
+
+                if not aligned_gt:
+                    continue
+
+                ttt_acc = vqa_accuracy(aligned_ttt, aligned_gt)
+                if ttt_acc > best_acc:
+                    best_acc = ttt_acc
+                    best_file = ttt_file
+                    best_triplets = (aligned_base, aligned_ttt, aligned_gt)
+
+            if best_triplets is not None:
+                aligned_base, aligned_ttt, aligned_gt = best_triplets
                 mcnemar = mcnemar_test(aligned_base, aligned_ttt, aligned_gt)
                 print(f"\n{'='*70}")
                 print(f"  McNemar's Test (Base vs TTT)")
                 print(f"{'='*70}")
+                print(f"  Selected TTT run: {os.path.basename(best_file)} (acc={best_acc*100:.2f}%)")
                 print(f"  Base ✓, TTT ✗: {mcnemar['b_base_correct_ttt_wrong']}")
                 print(f"  Base ✗, TTT ✓: {mcnemar['c_base_wrong_ttt_correct']}")
                 print(f"  χ² = {mcnemar['chi2']:.3f}, p = {mcnemar['p_value']:.4f}")

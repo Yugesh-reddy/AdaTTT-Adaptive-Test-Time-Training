@@ -64,6 +64,7 @@ class TTTAdapter:
         self.k_steps = k_steps if k_steps is not None else config.get("ttt_k_steps_sweep", [1])[0]
         self.lr = config.get("ttt_lr", 1e-4)
         self.mask_ratio = config.get("ttt_mask_ratio", 0.25)
+        self.adapt_modules = list(config.get("ttt_adapt_modules", ["fusion", "prediction_head"]))
 
         self.use_consistency = use_consistency
         self.consistency_weight = config.get("consistency_weight", 0.1)
@@ -73,6 +74,26 @@ class TTTAdapter:
 
         # Augmentation pipeline for consistency regularization
         self._consistency_transforms = None
+
+    def _ttt_module_names(self) -> List[str]:
+        """Resolve module names for TTT adaptation.
+
+        Includes config-selected trainable modules and objective-specific heads.
+        """
+        names = list(self.adapt_modules)
+        if self.objective == "masked_patch":
+            names.append("mask_proj")
+        elif self.objective == "rotation":
+            names.append("rotation_head")
+
+        # De-duplicate while preserving order.
+        deduped = []
+        seen = set()
+        for name in names:
+            if name not in seen:
+                deduped.append(name)
+                seen.add(name)
+        return deduped
 
     # ------------------------------------------------------------------
     # Main entry point
@@ -104,11 +125,19 @@ class TTTAdapter:
             logits, z = self.model.fuse_and_predict(visual_tokens, text_tokens, text_mask)
             return logits, 0.0
 
-        # 1. SAVE original parameters
-        anchor_state = {
-            name: param.data.clone()
-            for name, param in self.model.get_ttt_params_named()
-        }
+        # 1. Resolve and SAVE original parameters
+        ttt_modules = self._ttt_module_names()
+        named_ttt_params = self.model.get_ttt_params_named(
+            adapt_modules=ttt_modules,
+            include_auxiliary=True,
+        )
+        if not named_ttt_params:
+            raise ValueError(
+                "No parameters selected for TTT adaptation. "
+                "Check config['ttt_adapt_modules']."
+            )
+
+        anchor_state = {name: param.data.clone() for name, param in named_ttt_params}
 
         # Save anchor representation for mixup
         if self.use_mixup:
@@ -116,7 +145,7 @@ class TTTAdapter:
                 z_anchor = self.model.fusion(visual_tokens, text_tokens, text_mask).detach()
 
         # 2. Create a SEPARATE optimizer for TTT
-        ttt_optimizer = torch.optim.Adam(self.model.get_ttt_params(), lr=self.lr)
+        ttt_optimizer = torch.optim.Adam([p for _, p in named_ttt_params], lr=self.lr)
 
         # 3. TTT gradient steps
         final_loss = 0.0
@@ -152,7 +181,7 @@ class TTTAdapter:
         logits = self.model.prediction_head(z_adapted)
 
         # 5. RESTORE original parameters (CRITICAL)
-        for name, param in self.model.get_ttt_params_named():
+        for name, param in named_ttt_params:
             param.data.copy_(anchor_state[name])
 
         return logits.detach(), final_loss
