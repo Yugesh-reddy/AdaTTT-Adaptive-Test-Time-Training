@@ -161,6 +161,9 @@ def main():
             "config": f"Adaptive τ={threshold}, K={k}",
             "accuracy": acc,
             "avg_flops": avg_flops,
+            "skip_rate": skip_rate,
+            "skip_count": skip,
+            "adapt_count": adapt,
         })
 
     # 4. Pareto frontier
