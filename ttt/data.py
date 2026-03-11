@@ -374,7 +374,7 @@ def vqa_collate_fn(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
 # Download utilities
 # ---------------------------------------------------------------------------
 
-def download_vqa_v2(data_dir: str) -> None:
+def download_vqa_v2(data_dir: str, include_image_instructions: bool = True) -> None:
     """Download VQA-v2 data files.
 
     Files needed:
@@ -425,14 +425,15 @@ def download_vqa_v2(data_dir: str) -> None:
             zf.extractall(data_dir)
 
     # Image downloads — print instructions (too large for auto-download)
-    print("\n" + "=" * 60)
-    print("IMAGE DOWNLOAD INSTRUCTIONS")
-    print("=" * 60)
-    print("VQA-v2 images are large. Download manually:")
-    print(f"  train2014: http://images.cocodataset.org/zips/train2014.zip (~13GB)")
-    print(f"  val2014:   http://images.cocodataset.org/zips/val2014.zip (~6GB)")
-    print(f"  Extract to: {data_dir}")
-    print("=" * 60)
+    if include_image_instructions:
+        print("\n" + "=" * 60)
+        print("IMAGE DOWNLOAD INSTRUCTIONS")
+        print("=" * 60)
+        print("VQA-v2 images are large. Download manually:")
+        print(f"  train2014: http://images.cocodataset.org/zips/train2014.zip (~13GB)")
+        print(f"  val2014:   http://images.cocodataset.org/zips/val2014.zip (~6GB)")
+        print(f"  Extract to: {data_dir}")
+        print("=" * 60)
 
 
 # ---------------------------------------------------------------------------
