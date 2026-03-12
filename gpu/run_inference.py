@@ -78,6 +78,7 @@ def main():
     data_dir = config.get("data_dir", "data/")
     dataset_name = args.dataset or config.get("dataset", "vqa_v2")
     is_memotion2 = dataset_name == "memotion2"
+    strict_images = config.get("strict_images", True)
 
     # Override num_answers for Memotion2
     if is_memotion2:
@@ -112,6 +113,7 @@ def main():
             image_dir=os.path.join(memo_dir, "images"),
             max_question_length=config.get("max_question_length", 20),
             image_size=config.get("image_size", 224),
+            strict_images=strict_images,
         )
     else:
         answer_vocab = load_answer_vocab(os.path.join(data_dir, "answer_vocab.json"))
@@ -123,6 +125,7 @@ def main():
             max_question_length=config.get("max_question_length", 20),
             image_size=config.get("image_size", 224),
             split="val",
+            strict_images=strict_images,
         )
 
     if args.max_samples:
