@@ -136,6 +136,7 @@ class VQADataset(Dataset):
         max_question_length: int = 20,
         image_size: int = 224,
         split: str = "train",
+        strict_images: bool = True,
     ):
         """
         Args:
@@ -153,6 +154,7 @@ class VQADataset(Dataset):
         self.max_question_length = max_question_length
         self.image_size = image_size
         self.split = split
+        self.strict_images = strict_images
         self.transform = get_image_transform(image_size)
 
         # Load tokenizer
@@ -213,7 +215,11 @@ class VQADataset(Dataset):
             image = Image.open(sample["image_path"]).convert("RGB")
             image = self.transform(image)
         except (FileNotFoundError, OSError):
-            # Return a blank image if file not found (graceful fallback)
+            if self.strict_images:
+                raise FileNotFoundError(
+                    f"Image file missing or unreadable for sample_id={sample['sample_id']}: "
+                    f"{sample['image_path']}"
+                )
             image = torch.zeros(3, self.image_size, self.image_size)
 
         # Tokenize question
@@ -256,6 +262,7 @@ class VizWizDataset(Dataset):
         tokenizer: Any = None,
         max_question_length: int = 20,
         image_size: int = 224,
+        strict_images: bool = True,
     ):
         """
         Args:
@@ -270,6 +277,7 @@ class VizWizDataset(Dataset):
         self.answer_vocab = answer_vocab
         self.max_question_length = max_question_length
         self.image_size = image_size
+        self.strict_images = strict_images
         self.transform = get_image_transform(image_size)
 
         if tokenizer is None:
@@ -318,6 +326,11 @@ class VizWizDataset(Dataset):
             image = Image.open(sample["image_path"]).convert("RGB")
             image = self.transform(image)
         except (FileNotFoundError, OSError):
+            if self.strict_images:
+                raise FileNotFoundError(
+                    f"Image file missing or unreadable for sample_id={sample['sample_id']}: "
+                    f"{sample['image_path']}"
+                )
             image = torch.zeros(3, self.image_size, self.image_size)
 
         encoding = self.tokenizer(
@@ -481,6 +494,7 @@ class Memotion2Dataset(Dataset):
         tokenizer: Any = None,
         max_question_length: int = 20,
         image_size: int = 224,
+        strict_images: bool = True,
     ):
         """
         Args:
@@ -498,6 +512,7 @@ class Memotion2Dataset(Dataset):
         self.label_map = label_map or build_memotion2_label_map()
         self.max_question_length = max_question_length
         self.image_size = image_size
+        self.strict_images = strict_images
         self.transform = get_image_transform(image_size)
 
         if tokenizer is None:
@@ -542,6 +557,11 @@ class Memotion2Dataset(Dataset):
             image = Image.open(sample["image_path"]).convert("RGB")
             image = self.transform(image)
         except (FileNotFoundError, OSError):
+            if self.strict_images:
+                raise FileNotFoundError(
+                    f"Image file missing or unreadable for sample_id={sample['sample_id']}: "
+                    f"{sample['image_path']}"
+                )
             image = torch.zeros(3, self.image_size, self.image_size)
 
         # Tokenize OCR text
