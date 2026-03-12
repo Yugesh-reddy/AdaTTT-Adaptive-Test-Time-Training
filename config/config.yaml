@@ -46,6 +46,7 @@ max_question_length: 20                          # BERT tokenizer max length
 train_split: "train"
 val_split: "val"
 data_dir: "data/"
+strict_images: true                             # Fail fast on missing/corrupt images
 
 # === Memotion2 (cross-task evaluation) ===
 memotion2_num_classes: 3                         # positive / negative / neutral
