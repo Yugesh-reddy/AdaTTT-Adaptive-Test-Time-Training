@@ -21,6 +21,7 @@ Loss: L = L_vqa + 0.1 * L_gate
 """
 
 import argparse
+import math
 import os
 import sys
 import time
@@ -109,6 +110,7 @@ def main():
     weight_decay = config.get("train_weight_decay", 0.01)
     warmup_ratio = config.get("train_warmup_ratio", 0.1)
     data_dir = config.get("data_dir", "data/")
+    strict_images = config.get("strict_images", True)
 
     logger.info(f"Device: {device}")
     logger.info(f"Dataset: {dataset_name}")
@@ -137,12 +139,14 @@ def main():
             image_dir=os.path.join(memo_dir, "images"),
             max_question_length=config.get("max_question_length", 20),
             image_size=config.get("image_size", 224),
+            strict_images=strict_images,
         )
         val_dataset = Memotion2Dataset(
             annotations_path=os.path.join(memo_dir, "val.json"),
             image_dir=os.path.join(memo_dir, "images"),
             max_question_length=config.get("max_question_length", 20),
             image_size=config.get("image_size", 224),
+            strict_images=strict_images,
         )
     else:
         # Load answer vocabulary for VQA
@@ -158,6 +162,7 @@ def main():
             max_question_length=config.get("max_question_length", 20),
             image_size=config.get("image_size", 224),
             split="train",
+            strict_images=strict_images,
         )
         val_dataset = VQADataset(
             questions_path=os.path.join(data_dir, "v2_OpenEnded_mscoco_val2014_questions.json"),
@@ -167,6 +172,7 @@ def main():
             max_question_length=config.get("max_question_length", 20),
             image_size=config.get("image_size", 224),
             split="val",
+            strict_images=strict_images,
         )
 
     logger.info(f"Train samples: {len(train_dataset)}")
@@ -188,8 +194,14 @@ def main():
     # Scheduler
     total_steps = len(train_loader) * epochs
     warmup_steps = int(total_steps * warmup_ratio)
+    def lr_lambda(step: int) -> float:
+        if warmup_steps > 0 and step < warmup_steps:
+            return float(step + 1) / float(max(1, warmup_steps))
+        progress = float(step - warmup_steps) / float(max(1, total_steps - warmup_steps))
+        progress = min(max(progress, 0.0), 1.0)
+        return 0.5 * (1.0 + math.cos(math.pi * progress))
 
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_steps)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
 
     # Resume from checkpoint
     start_epoch = 0
@@ -276,6 +288,7 @@ def main():
             results_dir = config.get("results_dir", "results/")
             os.makedirs(results_dir, exist_ok=True)
             save_json(val_predictions, os.path.join(results_dir, "base_predictions.json"))
+            save_json(val_predictions, os.path.join(results_dir, "base_predictions_val.json"))
 
     logger.info(f"\nTraining complete! Best val accuracy: {best_val_acc*100:.2f}%")
     logger.info(f"Best checkpoint: {os.path.join(checkpoint_dir, 'best.pt')}")

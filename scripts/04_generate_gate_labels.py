@@ -8,11 +8,13 @@ which samples benefit from TTT adaptation.
 This runs LOCALLY (no GPU needed — reads saved prediction files).
 
 Usage:
-    python scripts/04_generate_gate_labels.py --config config/config.yaml
+    python scripts/04_generate_gate_labels.py --config config/config.yaml --split train
 
 Prerequisites:
-    - results/base_predictions.json (from gpu/train_base.py)
-    - results/ttt_predictions/k1_masked_patch.json (from gpu/run_ttt_sweep.py)
+    - Base predictions for chosen split, e.g.:
+      results/ttt_predictions/train/k0_baseline.json
+    - TTT predictions for chosen split, e.g.:
+      results/ttt_predictions/train/k1_masked_patch.json
 """
 
 import argparse
@@ -28,6 +30,13 @@ def main():
     parser = argparse.ArgumentParser(description="Generate gate training labels")
     parser.add_argument(
         "--config", type=str, default="config/config.yaml", help="Path to config"
+    )
+    parser.add_argument(
+        "--split",
+        type=str,
+        default="train",
+        choices=["train", "val"],
+        help="Dataset split for gate labels. Default: train.",
     )
     parser.add_argument(
         "--base-predictions",
@@ -53,11 +62,30 @@ def main():
     results_dir = config.get("results_dir", "results/")
     data_dir = config.get("data_dir", "data/")
 
-    base_path = args.base_predictions or os.path.join(results_dir, "base_predictions.json")
-    ttt_path = args.ttt_predictions or os.path.join(
-        results_dir, "ttt_predictions", "k1_masked_patch.json"
-    )
-    output_path = args.output or os.path.join(data_dir, "gate_labels.json")
+    if args.base_predictions:
+        base_path = args.base_predictions
+    else:
+        base_candidates = [
+            os.path.join(results_dir, f"base_predictions_{args.split}.json"),
+            os.path.join(results_dir, "ttt_predictions", args.split, "k0_baseline.json"),
+        ]
+        if args.split == "val":
+            # Backward-compatibility with older base training outputs.
+            base_candidates.append(os.path.join(results_dir, "base_predictions.json"))
+        base_path = next((p for p in base_candidates if os.path.exists(p)), base_candidates[0])
+
+    if args.ttt_predictions:
+        ttt_path = args.ttt_predictions
+    else:
+        ttt_candidates = [
+            os.path.join(results_dir, "ttt_predictions", args.split, "k1_masked_patch.json"),
+        ]
+        if args.split == "val":
+            # Backward-compatibility with older TTT sweep outputs.
+            ttt_candidates.append(os.path.join(results_dir, "ttt_predictions", "k1_masked_patch.json"))
+        ttt_path = next((p for p in ttt_candidates if os.path.exists(p)), ttt_candidates[0])
+
+    output_path = args.output or os.path.join(data_dir, f"gate_labels_{args.split}.json")
 
     print("=" * 60)
     print("Generating Gate Training Labels")
@@ -66,6 +94,11 @@ def main():
     print(f"  TTT predictions:  {ttt_path}")
     print(f"  Output:           {output_path}")
     print()
+
+    if not os.path.exists(base_path):
+        raise FileNotFoundError(f"Base predictions not found: {base_path}")
+    if not os.path.exists(ttt_path):
+        raise FileNotFoundError(f"TTT predictions not found: {ttt_path}")
 
     # Load predictions
     base_preds = load_json(base_path)
@@ -112,6 +145,7 @@ def main():
 
         gate_labels.append({
             "sample_id": sample_id,
+            "split": args.split,
             "gate_label": gate_label,
             "base_correct": base_correct,
             "ttt_helps": ttt_helps,

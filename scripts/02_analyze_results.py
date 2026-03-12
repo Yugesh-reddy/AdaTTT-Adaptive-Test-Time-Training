@@ -103,7 +103,7 @@ def main():
     # 2. TTT sweep predictions
     ttt_dir = os.path.join(results_dir, "ttt_predictions")
     if os.path.exists(ttt_dir):
-        ttt_files = sorted(glob.glob(os.path.join(ttt_dir, "*.json")))
+        ttt_files = sorted(glob.glob(os.path.join(ttt_dir, "**", "*.json"), recursive=True))
         for ttt_file in ttt_files:
             file_config = parse_config_from_filename(ttt_file)
             ttt_data = load_json(ttt_file)
@@ -177,7 +177,7 @@ def main():
 
     # 5. McNemar's test (base vs best TTT by accuracy)
     if os.path.exists(base_path) and os.path.exists(ttt_dir):
-        ttt_files = sorted(glob.glob(os.path.join(ttt_dir, "*.json")))
+        ttt_files = sorted(glob.glob(os.path.join(ttt_dir, "**", "*.json"), recursive=True))
         if ttt_files:
             base_data_reload = load_json(base_path)
             base_map = {d["sample_id"]: d for d in base_data_reload}
@@ -231,7 +231,7 @@ def main():
     memotion2_dir = os.path.join(results_dir, "memotion2")
     memotion2_results = []
     if os.path.exists(memotion2_dir):
-        memo_files = sorted(glob.glob(os.path.join(memotion2_dir, "*.json")))
+        memo_files = sorted(glob.glob(os.path.join(memotion2_dir, "**", "*.json"), recursive=True))
         if memo_files:
             print(f"\n{'='*70}")
             print(f"  Memotion2 Cross-Task Evaluation")

@@ -411,6 +411,19 @@ class FullVQAModel(nn.Module):
         self.vit = load_frozen_vit(config.get("vision_encoder", "google/vit-base-patch16-224"))
         self.bert = load_frozen_bert(config.get("text_encoder", "bert-base-uncased"))
 
+    def train(self, mode: bool = True):
+        """Override train() to keep frozen encoders in eval mode.
+
+        This prevents dropout/stochastic behavior in ViT/BERT when the top-level
+        model is switched to train mode for fusion/head optimization.
+        """
+        super().train(mode)
+        if self.vit is not None:
+            self.vit.eval()
+        if self.bert is not None:
+            self.bert.eval()
+        return self
+
     def forward(
         self,
         images: torch.Tensor,
@@ -456,6 +469,9 @@ class FullVQAModel(nn.Module):
         assert self.vit is not None and self.bert is not None, (
             "Call model.load_encoders(config) before forward pass."
         )
+        # Keep frozen encoders deterministic even if parent module is in train mode.
+        self.vit.eval()
+        self.bert.eval()
         visual_tokens = self.vit(pixel_values=images).last_hidden_state
         text_output = self.bert(input_ids=input_ids, attention_mask=attention_mask)
         text_tokens = text_output.last_hidden_state

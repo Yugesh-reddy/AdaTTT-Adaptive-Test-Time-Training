@@ -3,7 +3,7 @@
 The main experiment: sweep K steps × TTT objective.
 
 Usage on Colab:
-    !python gpu/run_ttt_sweep.py --checkpoint checkpoints/base/best.pt --k 0
+    !python gpu/run_ttt_sweep.py --checkpoint checkpoints/base/best.pt --k 0 --split train
     !python gpu/run_ttt_sweep.py --checkpoint checkpoints/base/best.pt --k 1 --objective masked_patch
     !python gpu/run_ttt_sweep.py --checkpoint checkpoints/base/best.pt --k 1 --objective rotation
     !python gpu/run_ttt_sweep.py --checkpoint checkpoints/base/best.pt --k 3 --objective masked_patch
@@ -52,6 +52,13 @@ def main():
                         choices=["masked_patch", "rotation"])
     parser.add_argument("--batch-size", type=int, default=1,
                         help="Batch size for TTT (typically 1 for per-sample adaptation)")
+    parser.add_argument(
+        "--split",
+        type=str,
+        default="val",
+        choices=["train", "val"],
+        help="Dataset split to evaluate. Use train for gate-label generation.",
+    )
     parser.add_argument("--dataset", type=str, default=None,
                         help="Dataset: vqa_v2, vizwiz, or memotion2 (overrides config)")
     parser.add_argument("--max-samples", type=int, default=None,
@@ -64,9 +71,11 @@ def main():
 
     k = args.k
     objective = args.objective
+    split = args.split
     data_dir = config.get("data_dir", "data/")
     dataset_name = args.dataset or config.get("dataset", "vqa_v2")
     is_memotion2 = dataset_name == "memotion2"
+    strict_images = config.get("strict_images", True)
 
     # Override num_answers for Memotion2
     if is_memotion2:
@@ -74,6 +83,12 @@ def main():
 
     logger.info(f"TTT Sweep: K={k}, objective={objective}, dataset={dataset_name}")
     logger.info(f"Device: {device}")
+    logger.info(f"Split: {split}")
+
+    if args.batch_size != 1:
+        raise ValueError(
+            "TTT sweep requires --batch-size 1 for per-sample adaptation semantics."
+        )
 
     # Load model
     model = FullVQAModel(config)
@@ -91,21 +106,24 @@ def main():
     if is_memotion2:
         memo_dir = config.get("memotion2_data_dir", os.path.join(data_dir, "memotion2"))
         val_dataset = Memotion2Dataset(
-            annotations_path=os.path.join(memo_dir, "val.json"),
+            annotations_path=os.path.join(memo_dir, f"{split}.json"),
             image_dir=os.path.join(memo_dir, "images"),
             max_question_length=config.get("max_question_length", 20),
             image_size=config.get("image_size", 224),
+            strict_images=strict_images,
         )
     else:
         answer_vocab = load_answer_vocab(os.path.join(data_dir, "answer_vocab.json"))
+        split_year = "train2014" if split == "train" else "val2014"
         val_dataset = VQADataset(
-            questions_path=os.path.join(data_dir, "v2_OpenEnded_mscoco_val2014_questions.json"),
-            annotations_path=os.path.join(data_dir, "v2_mscoco_val2014_annotations.json"),
-            image_dir=os.path.join(data_dir, "val2014"),
+            questions_path=os.path.join(data_dir, f"v2_OpenEnded_mscoco_{split_year}_questions.json"),
+            annotations_path=os.path.join(data_dir, f"v2_mscoco_{split_year}_annotations.json"),
+            image_dir=os.path.join(data_dir, split_year),
             answer_vocab=answer_vocab,
             max_question_length=config.get("max_question_length", 20),
             image_size=config.get("image_size", 224),
-            split="val",
+            split="train" if split == "train" else "val",
+            strict_images=strict_images,
         )
 
     if args.max_samples:
@@ -167,9 +185,9 @@ def main():
 
     # Save results
     if is_memotion2:
-        results_dir = os.path.join(config.get("results_dir", "results/"), "memotion2")
+        results_dir = os.path.join(config.get("results_dir", "results/"), "memotion2", split)
     else:
-        results_dir = os.path.join(config.get("results_dir", "results/"), "ttt_predictions")
+        results_dir = os.path.join(config.get("results_dir", "results/"), "ttt_predictions", split)
     os.makedirs(results_dir, exist_ok=True)
 
     filename = f"k{k}_{objective}.json" if k > 0 else "k0_baseline.json"
