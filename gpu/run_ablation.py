@@ -57,6 +57,13 @@ def main():
     parser.add_argument("--mode", type=str, required=True, choices=list(MODES.keys()))
     parser.add_argument("--objective", type=str, default="masked_patch")
     parser.add_argument("--batch-size", type=int, default=1)
+    parser.add_argument(
+        "--split",
+        type=str,
+        default="val",
+        choices=["train", "val"],
+        help="Dataset split to evaluate.",
+    )
     parser.add_argument("--max-samples", type=int, default=None)
     args = parser.parse_args()
 
@@ -65,9 +72,16 @@ def main():
     logger = setup_logging("logs")
 
     mode_config = MODES[args.mode]
+    strict_images = config.get("strict_images", True)
     logger.info(f"Ablation: mode={args.mode}, K={args.k}, {args.objective}")
     logger.info(f"  consistency={mode_config['use_consistency']}, mixup={mode_config['use_mixup']}")
     logger.info(f"Device: {device}")
+    logger.info(f"Split: {args.split}")
+
+    if args.batch_size != 1:
+        raise ValueError(
+            "Ablation requires --batch-size 1 for per-sample adaptation semantics."
+        )
 
     # Load model
     model = FullVQAModel(config)
@@ -88,14 +102,16 @@ def main():
     # Load dataset
     data_dir = config.get("data_dir", "data/")
     answer_vocab = load_answer_vocab(os.path.join(data_dir, "answer_vocab.json"))
+    split_year = "train2014" if args.split == "train" else "val2014"
     val_dataset = VQADataset(
-        questions_path=os.path.join(data_dir, "v2_OpenEnded_mscoco_val2014_questions.json"),
-        annotations_path=os.path.join(data_dir, "v2_mscoco_val2014_annotations.json"),
-        image_dir=os.path.join(data_dir, "val2014"),
+        questions_path=os.path.join(data_dir, f"v2_OpenEnded_mscoco_{split_year}_questions.json"),
+        annotations_path=os.path.join(data_dir, f"v2_mscoco_{split_year}_annotations.json"),
+        image_dir=os.path.join(data_dir, split_year),
         answer_vocab=answer_vocab,
         max_question_length=config.get("max_question_length", 20),
         image_size=config.get("image_size", 224),
-        split="val",
+        split="train" if args.split == "train" else "val",
+        strict_images=strict_images,
     )
 
     if args.max_samples:
@@ -156,7 +172,7 @@ def main():
     ablation_dir = os.path.join(config.get("results_dir", "results/"), "ablation")
     os.makedirs(ablation_dir, exist_ok=True)
 
-    filename = f"{args.mode}_k{args.k}.json"
+    filename = f"{args.mode}_{args.split}_k{args.k}.json"
     save_path = os.path.join(ablation_dir, filename)
     save_json(all_predictions, save_path)
     logger.info(f"  Saved: {save_path}")
