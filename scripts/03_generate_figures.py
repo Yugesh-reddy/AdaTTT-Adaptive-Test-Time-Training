@@ -304,7 +304,7 @@ def fig7_cross_task_generalization(results_dir: str, vqa_results: List[Dict], ou
         print("  [skip] No Memotion2 results found")
         return
 
-    memo_files = glob.glob(os.path.join(memotion2_dir, "*.json"))
+    memo_files = glob.glob(os.path.join(memotion2_dir, "**", "*.json"), recursive=True)
     if not memo_files:
         print("  [skip] No Memotion2 result files")
         return
