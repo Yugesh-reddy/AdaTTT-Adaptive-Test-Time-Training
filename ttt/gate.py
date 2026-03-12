@@ -96,15 +96,18 @@ class AdaptiveRouter:
         # 4b. Process ADAPT samples (TTT adaptation)
         if adapt_count > 0:
             adapt_idx = (~skip_mask).nonzero(as_tuple=True)[0]
-            adapt_images = images[adapt_idx]
-            adapt_visual = visual_tokens[adapt_idx]
-            adapt_text = text_tokens[adapt_idx]
-            adapt_mask = attention_mask[adapt_idx] if attention_mask is not None else None
-
-            adapt_logits, ttt_loss = self.ttt_adapter.adapt_and_predict(
-                adapt_images, adapt_visual, adapt_text, adapt_mask
-            )
-            all_logits[adapt_idx] = adapt_logits
+            # Run TTT independently per sample to preserve per-sample adaptation semantics.
+            for idx in adapt_idx.tolist():
+                sample_images = images[idx:idx + 1]
+                sample_visual = visual_tokens[idx:idx + 1]
+                sample_text = text_tokens[idx:idx + 1]
+                sample_mask = (
+                    attention_mask[idx:idx + 1] if attention_mask is not None else None
+                )
+                sample_logits, _ = self.ttt_adapter.adapt_and_predict(
+                    sample_images, sample_visual, sample_text, sample_mask
+                )
+                all_logits[idx] = sample_logits.squeeze(0)
 
         # 5. Build routing info
         routing_info = {
