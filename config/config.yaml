@@ -21,6 +21,7 @@ ttt_k_steps_sweep: [0, 1, 2, 3, 5]              # 0 = no TTT (baseline)
 ttt_lr: 1.0e-4                                   # TTT inner learning rate
 ttt_mask_ratio: 0.25                             # For masked patch prediction
 ttt_adapt_modules: ["fusion", "prediction_head"] # Which modules get TTT gradients
+ttt_grad_clip: 1.0                               # Max gradient norm during TTT steps
 
 # === TTT Stabilization ===
 consistency_weight: 0.1                          # λ_cons for consistency regularization

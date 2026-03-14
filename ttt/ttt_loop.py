@@ -72,6 +72,8 @@ class TTTAdapter:
         self.use_mixup = use_mixup
         self.mixup_alpha_range = tuple(config.get("mixup_alpha_range", [0.7, 1.0]))
 
+        self.grad_clip = config.get("ttt_grad_clip", 1.0)
+
         # Augmentation pipeline for consistency regularization
         self._consistency_transforms = None
 
@@ -168,6 +170,10 @@ class TTTAdapter:
                 loss = loss + self.consistency_weight * cons_loss
 
             loss.backward()
+            if self.grad_clip > 0:
+                torch.nn.utils.clip_grad_norm_(
+                    [p for _, p in named_ttt_params], max_norm=self.grad_clip
+                )
             ttt_optimizer.step()
             final_loss = loss.item()
 
