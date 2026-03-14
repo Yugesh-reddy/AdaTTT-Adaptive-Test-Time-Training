@@ -95,6 +95,7 @@ def main():
     config = load_config(args.config)
     set_seed(config.get("seed", 42))
     device = get_device()
+    use_amp = device.type == "cuda"
     logger = setup_logging("logs")
 
     epochs = args.epochs or config.get("gate_epochs", 5)
@@ -203,12 +204,12 @@ def main():
             gate_labels = batch["gate_labels"].to(device)
 
             # Encode and fuse (no grad through frozen parts)
-            with torch.no_grad():
+            with torch.no_grad(), torch.cuda.amp.autocast(enabled=use_amp):
                 visual_tokens, text_tokens = model.encode(images, input_ids, attention_mask)
                 z = model.fusion(visual_tokens, text_tokens, attention_mask)
 
-            # Gate prediction (gradients only for gate)
-            confidence = model.gate(z)
+            # Gate prediction (gradients only for gate, fp32 for BCE stability)
+            confidence = model.gate(z.float())
             loss = F.binary_cross_entropy(confidence.squeeze(-1), gate_labels)
 
             optimizer.zero_grad()
@@ -232,9 +233,10 @@ def main():
                 attention_mask = batch["attention_mask"].to(device)
                 gate_labels = batch["gate_labels"].to(device)
 
-                visual_tokens, text_tokens = model.encode(images, input_ids, attention_mask)
-                z = model.fusion(visual_tokens, text_tokens, attention_mask)
-                confidence = model.gate(z)
+                with torch.cuda.amp.autocast(enabled=use_amp):
+                    visual_tokens, text_tokens = model.encode(images, input_ids, attention_mask)
+                    z = model.fusion(visual_tokens, text_tokens, attention_mask)
+                confidence = model.gate(z.float())
                 loss = F.binary_cross_entropy(confidence.squeeze(-1), gate_labels)
 
                 val_loss += loss.item()
