@@ -38,16 +38,19 @@ class AdaptiveRouter:
         model: nn.Module,
         ttt_adapter: Any,
         threshold: float = 0.8,
+        use_amp: bool = False,
     ):
         """
         Args:
             model: FullVQAModel instance (with encoders loaded).
             ttt_adapter: TTTAdapter instance.
             threshold: Gate threshold τ. High confidence > τ → SKIP.
+            use_amp: Enable mixed precision for encoding.
         """
         self.model = model
         self.ttt_adapter = ttt_adapter
         self.threshold = threshold
+        self.use_amp = use_amp
 
     def predict(
         self,
@@ -69,11 +72,12 @@ class AdaptiveRouter:
         B = images.shape[0]
         device = images.device
 
-        # 1. Encode all samples
-        visual_tokens, text_tokens = self.model.encode(images, input_ids, attention_mask)
+        # 1. Encode all samples (with optional AMP)
+        with torch.cuda.amp.autocast(enabled=self.use_amp):
+            visual_tokens, text_tokens = self.model.encode(images, input_ids, attention_mask)
 
         # 2. Fuse → z for ALL samples
-        z = self.model.fusion(visual_tokens, text_tokens, attention_mask)
+        z = self.model.fusion(visual_tokens.float(), text_tokens.float(), attention_mask)
 
         # 3. Gate confidence
         confidence = self.model.gate(z)  # (B, 1)

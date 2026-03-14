@@ -44,10 +44,11 @@ from ttt.utils import (
     setup_logging,
     get_device,
     count_parameters,
+    set_seed,
 )
 
 
-def evaluate(model, val_loader, device):
+def evaluate(model, val_loader, device, use_amp=False):
     """Evaluate model on validation set."""
     model.eval()
     correct = 0
@@ -61,7 +62,8 @@ def evaluate(model, val_loader, device):
             attention_mask = batch["attention_mask"].to(device)
             answers = batch["answer_idx"].to(device)
 
-            logits, confidence, z = model(images, input_ids, attention_mask)
+            with torch.cuda.amp.autocast(enabled=use_amp):
+                logits, confidence, z = model(images, input_ids, attention_mask)
             preds = logits.argmax(dim=-1)
 
             correct += (preds == answers).sum().item()
@@ -92,7 +94,9 @@ def main():
     args = parser.parse_args()
 
     config = load_config(args.config)
+    set_seed(config.get("seed", 42))
     device = get_device()
+    use_amp = device.type == "cuda"
     logger = setup_logging("logs")
 
     # Determine dataset
@@ -112,7 +116,7 @@ def main():
     data_dir = config.get("data_dir", "data/")
     strict_images = config.get("strict_images", True)
 
-    logger.info(f"Device: {device}")
+    logger.info(f"Device: {device}, AMP: {use_amp}")
     logger.info(f"Dataset: {dataset_name}")
     logger.info(f"Epochs: {epochs}, Batch size: {batch_size}, LR: {lr}")
 
@@ -215,6 +219,7 @@ def main():
     best_val_acc = 0.0
     checkpoint_dir = os.path.join(config.get("checkpoint_dir", "checkpoints/"), "base")
     os.makedirs(checkpoint_dir, exist_ok=True)
+    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
 
     for epoch in range(start_epoch, epochs):
         model.train()
@@ -230,25 +235,26 @@ def main():
             attention_mask = batch["attention_mask"].to(device)
             answers = batch["answer_idx"].to(device)
 
-            # Forward pass
-            logits, confidence, z = model(images, input_ids, attention_mask)
+            # Forward pass with mixed precision
+            with torch.cuda.amp.autocast(enabled=use_amp):
+                logits, confidence, z = model(images, input_ids, attention_mask)
+                loss_vqa = F.cross_entropy(logits, answers)
 
-            # VQA loss
-            loss_vqa = F.cross_entropy(logits, answers)
-
-            # Gate auxiliary loss: predict whether base model gets it right
+            # Gate auxiliary loss (fp32 for BCE numerical stability)
             with torch.no_grad():
                 correct = (logits.argmax(dim=-1) == answers).float()
-            loss_gate = F.binary_cross_entropy(confidence.squeeze(-1), correct)
+            loss_gate = F.binary_cross_entropy(confidence.float().squeeze(-1), correct)
 
             # Combined loss
             loss = loss_vqa + 0.1 * loss_gate
 
-            # Backward
+            # Backward with gradient scaling
             optimizer.zero_grad()
-            loss.backward()
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(trainable_params, max_norm=1.0)
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
             scheduler.step()
 
             epoch_loss += loss.item()
@@ -272,7 +278,7 @@ def main():
         )
 
         # Validate
-        val_acc, val_predictions = evaluate(model, val_loader, device)
+        val_acc, val_predictions = evaluate(model, val_loader, device, use_amp=use_amp)
         logger.info(f"Epoch {epoch+1} | Val accuracy: {val_acc*100:.2f}%")
 
         # Save checkpoint

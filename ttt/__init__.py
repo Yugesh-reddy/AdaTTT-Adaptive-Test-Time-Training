@@ -34,6 +34,7 @@ from ttt.utils import (
     setup_logging,
     get_device,
     count_parameters,
+    set_seed,
 )
 
 __version__ = "0.1.0"

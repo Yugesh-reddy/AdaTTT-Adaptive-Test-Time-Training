@@ -7,11 +7,28 @@ Provides config loading, JSON I/O, model checkpointing, and logging setup.
 import json
 import logging
 import os
+import random
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
+import numpy as np
 import yaml
 import torch
+
+
+def set_seed(seed: int = 42) -> None:
+    """Set random seeds for reproducibility.
+
+    Args:
+        seed: Random seed value.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
 
 def load_config(path: str = "config/config.yaml") -> Dict[str, Any]:

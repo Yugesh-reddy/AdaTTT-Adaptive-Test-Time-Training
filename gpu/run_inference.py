@@ -49,6 +49,7 @@ from ttt.utils import (
     save_json,
     setup_logging,
     get_device,
+    set_seed,
 )
 
 
@@ -69,7 +70,9 @@ def main():
     args = parser.parse_args()
 
     config = load_config(args.config)
+    set_seed(config.get("seed", 42))
     device = get_device()
+    use_amp = device.type == "cuda"
     logger = setup_logging("logs")
 
     threshold = args.threshold
@@ -85,7 +88,7 @@ def main():
         config["num_answers"] = config.get("memotion2_num_classes", 3)
 
     logger.info(f"Adaptive Inference: τ={threshold}, K={k}, {objective}, dataset={dataset_name}")
-    logger.info(f"Device: {device}")
+    logger.info(f"Device: {device}, AMP: {use_amp}")
 
     # Load model
     model = FullVQAModel(config)
@@ -103,7 +106,7 @@ def main():
 
     # Create TTT adapter and router
     ttt_adapter = TTTAdapter(model, config, objective=objective, k_steps=k)
-    router = AdaptiveRouter(model, ttt_adapter, threshold=threshold)
+    router = AdaptiveRouter(model, ttt_adapter, threshold=threshold, use_amp=use_amp)
 
     # Load dataset
     if is_memotion2:
