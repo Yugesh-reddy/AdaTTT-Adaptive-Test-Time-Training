@@ -44,6 +44,7 @@ from ttt.utils import (
     setup_logging,
     get_device,
     count_parameters,
+    set_seed,
 )
 
 
@@ -92,6 +93,7 @@ def main():
     args = parser.parse_args()
 
     config = load_config(args.config)
+    set_seed(config.get("seed", 42))
     device = get_device()
     logger = setup_logging("logs")
 
