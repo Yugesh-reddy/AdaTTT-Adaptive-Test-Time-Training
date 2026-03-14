@@ -1,3 +1,6 @@
+# === Reproducibility ===
+seed: 42
+
 # === Model ===
 vision_encoder: "google/vit-base-patch16-224"   # Frozen
 text_encoder: "bert-base-uncased"                # Frozen
