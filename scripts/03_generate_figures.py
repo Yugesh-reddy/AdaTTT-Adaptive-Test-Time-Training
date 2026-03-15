@@ -386,6 +386,197 @@ def fig7_cross_task_generalization(results_dir: str, vqa_results: List[Dict], ou
     print(f"  ✅ {path}")
 
 
+def fig8_latency_budget(results_dir: str, output_dir: str):
+    """Figure 8: Latency budget — stacked horizontal bar for base vs TTT."""
+    latency_path = os.path.join(results_dir, "latency_profiles.json")
+    if not os.path.exists(latency_path):
+        print("  [skip] No latency profiles found")
+        return
+
+    data = load_json(latency_path)
+    if not data:
+        print("  [skip] Empty latency profiles")
+        return
+
+    fig, ax = plt.subplots(figsize=(10, 3))
+
+    stages = ["image_preprocess_ms", "vision_encode_ms", "text_encode_ms",
+              "fusion_predict_ms", "ttt_adaptation_ms"]
+    stage_labels = ["Preprocess", "ViT Encode", "BERT Encode", "Fusion+Predict", "TTT Adapt"]
+    colors = ["#9E9E9E", "#2196F3", "#4CAF50", "#FF9800", "#F44336"]
+
+    y_pos = 0
+    y_labels = []
+    y_ticks = []
+
+    for key in sorted(data.keys()):
+        profile = data[key]
+        left = 0
+        for stage, label, color in zip(stages, stage_labels, colors):
+            if stage not in profile:
+                continue
+            val = profile[stage]["p50"]
+            bar_label = label if y_pos == 0 else None
+            ax.barh(y_pos, val, left=left, height=0.6, color=color, label=bar_label, alpha=0.85)
+            if val > 2:
+                ax.text(left + val / 2, y_pos, f"{val:.0f}", ha="center", va="center", fontsize=7)
+            left += val
+        y_labels.append(key)
+        y_ticks.append(y_pos)
+        y_pos += 1
+
+    ax.set_yticks(y_ticks)
+    ax.set_yticklabels(y_labels)
+    ax.set_xlabel("Latency (ms) — P50")
+    ax.set_title("Per-Stage Latency Budget")
+    ax.legend(loc="upper right", fontsize=8)
+    ax.grid(True, alpha=0.2, axis="x")
+
+    path = os.path.join(output_dir, "fig8_latency_budget.png")
+    fig.savefig(path)
+    plt.close(fig)
+    print(f"  ✅ {path}")
+
+
+def fig9_component_ablation(results_dir: str, output_dir: str):
+    """Figure 9: Component ablation — which modules to adapt."""
+    ablation_dir = os.path.join(results_dir, "component_ablation")
+    if not os.path.exists(ablation_dir):
+        print("  [skip] No component ablation results found")
+        return
+
+    modes = ["fusion_only", "pred_only", "both", "all"]
+    labels = ["Fusion Only", "Pred Head Only", "Both (default)", "All (+ Gate)"]
+    accuracies = []
+    found_modes = []
+
+    for mode, label in zip(modes, labels):
+        files = glob.glob(os.path.join(ablation_dir, f"{mode}_*.json"))
+        if files:
+            data = load_json(files[0])
+            preds = [d["prediction"] for d in data]
+            gts = [d["ground_truth"] for d in data]
+            acc = sum(p == g for p, g in zip(preds, gts)) / len(preds) * 100 if preds else 0
+            accuracies.append(acc)
+            found_modes.append(label)
+
+    if not found_modes:
+        print("  [skip] No component ablation data")
+        return
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    colors = ["#2196F3", "#FF9800", "#4CAF50", "#9C27B0"]
+    bars = ax.bar(range(len(found_modes)), accuracies, color=colors[:len(found_modes)], alpha=0.85)
+
+    for bar, acc in zip(bars, accuracies):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.2,
+                f"{acc:.1f}%", ha="center", va="bottom", fontweight="bold")
+
+    ax.set_xticks(range(len(found_modes)))
+    ax.set_xticklabels(found_modes, rotation=15, ha="right")
+    ax.set_ylabel("VQA Accuracy (%)")
+    ax.set_title("Component Ablation: Which Modules to Adapt During TTT")
+    ax.grid(True, alpha=0.2, axis="y")
+
+    path = os.path.join(output_dir, "fig9_component_ablation.png")
+    fig.savefig(path)
+    plt.close(fig)
+    print(f"  ✅ {path}")
+
+
+def fig10_gate_sweep(results_dir: str, output_dir: str):
+    """Figure 10: Gate threshold sweep — dual y-axis accuracy + skip rate."""
+    sweep_path = os.path.join(results_dir, "gate_sweep.json")
+    if not os.path.exists(sweep_path):
+        print("  [skip] No gate sweep results found")
+        return
+
+    data = load_json(sweep_path)
+    thresholds_data = data.get("thresholds", {})
+    if not thresholds_data:
+        print("  [skip] No threshold data in gate sweep")
+        return
+
+    thresholds = []
+    accuracies = []
+    skip_rates = []
+
+    for key in sorted(thresholds_data.keys(), key=float):
+        entry = thresholds_data[key]
+        thresholds.append(entry["threshold"])
+        accuracies.append(entry["accuracy"] * 100)
+        skip_rates.append(entry["skip_rate"] * 100)
+
+    fig, ax1 = plt.subplots(figsize=(8, 5))
+    ax2 = ax1.twinx()
+
+    line1, = ax1.plot(thresholds, accuracies, "o-", color="#2196F3", linewidth=2,
+                      markersize=8, label="Accuracy (%)")
+    line2, = ax2.plot(thresholds, skip_rates, "s--", color="#F44336", linewidth=2,
+                      markersize=8, label="Skip Rate (%)")
+
+    ax1.set_xlabel("Gate Threshold (τ)")
+    ax1.set_ylabel("Accuracy (%)", color="#2196F3")
+    ax2.set_ylabel("Skip Rate (%)", color="#F44336")
+    ax1.set_title("Gate Threshold Sweep: Accuracy vs Skip Rate")
+
+    lines = [line1, line2]
+    labels = [l.get_label() for l in lines]
+    ax1.legend(lines, labels, loc="center left")
+    ax1.grid(True, alpha=0.2)
+
+    path = os.path.join(output_dir, "fig10_gate_sweep.png")
+    fig.savefig(path)
+    plt.close(fig)
+    print(f"  ✅ {path}")
+
+
+def fig11_warmup_curve(results_dir: str, output_dir: str):
+    """Figure 11: TTT warmup — rolling accuracy for cumulative vs restore."""
+    warmup_path = os.path.join(results_dir, "warmup_analysis.json")
+    if not os.path.exists(warmup_path):
+        print("  [skip] No warmup analysis results found")
+        return
+
+    data = load_json(warmup_path)
+    if not data:
+        print("  [skip] Empty warmup analysis")
+        return
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+    colors = {"restore": "#4CAF50", "cumulative": "#F44336"}
+    labels_map = {"restore": "Per-Sample Restore", "cumulative": "Cumulative (No Restore)"}
+
+    for mode in ["restore", "cumulative"]:
+        if mode not in data:
+            continue
+        samples = data[mode].get("per_sample", [])
+        if not samples:
+            continue
+
+        # Compute rolling accuracy (window=50)
+        window = 50
+        correct_flags = [s["correct"] for s in samples]
+        rolling = []
+        for i in range(len(correct_flags)):
+            start = max(0, i - window + 1)
+            rolling.append(sum(correct_flags[start:i + 1]) / (i - start + 1) * 100)
+
+        ax.plot(range(len(rolling)), rolling, color=colors.get(mode, "#607D8B"),
+                label=labels_map.get(mode, mode), linewidth=1.5, alpha=0.8)
+
+    ax.set_xlabel("Sample Index")
+    ax.set_ylabel("Rolling Accuracy (%) — Window=50")
+    ax.set_title("TTT Warmup: Cumulative vs Per-Sample Restore")
+    ax.legend()
+    ax.grid(True, alpha=0.2)
+
+    path = os.path.join(output_dir, "fig11_warmup_curve.png")
+    fig.savefig(path)
+    plt.close(fig)
+    print(f"  ✅ {path}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate publication figures")
     parser.add_argument("--config", type=str, default="config/config.yaml")
@@ -429,6 +620,18 @@ def main():
 
     print("\n📈 Figure 7: Cross-Task Generalization (VQA-v2 vs Memotion2)")
     fig7_cross_task_generalization(results_dir, results, output_dir)
+
+    print("\n📈 Figure 8: Latency Budget")
+    fig8_latency_budget(results_dir, output_dir)
+
+    print("\n📈 Figure 9: Component Ablation")
+    fig9_component_ablation(results_dir, output_dir)
+
+    print("\n📈 Figure 10: Gate Threshold Sweep")
+    fig10_gate_sweep(results_dir, output_dir)
+
+    print("\n📈 Figure 11: TTT Warmup Curve")
+    fig11_warmup_curve(results_dir, output_dir)
 
     print(f"\n✅ All figures saved to: {output_dir}/")
 
