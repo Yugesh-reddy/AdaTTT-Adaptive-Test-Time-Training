@@ -36,7 +36,7 @@ train_optimizer: "adamw"
 train_weight_decay: 0.01
 train_scheduler: "cosine"
 train_warmup_ratio: 0.1
-gradient_checkpointing: true                     # For T4 memory
+gradient_checkpointing: true                     # Saves VRAM during training
 
 # === Training (Gate) ===
 gate_batch_size: 128
