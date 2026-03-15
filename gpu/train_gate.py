@@ -204,7 +204,7 @@ def main():
             gate_labels = batch["gate_labels"].to(device)
 
             # Encode and fuse (no grad through frozen parts)
-            with torch.no_grad(), torch.cuda.amp.autocast(enabled=use_amp):
+            with torch.no_grad(), torch.amp.autocast("cuda", enabled=use_amp):
                 visual_tokens, text_tokens = model.encode(images, input_ids, attention_mask)
                 z = model.fusion(visual_tokens, text_tokens, attention_mask)
 
@@ -233,7 +233,7 @@ def main():
                 attention_mask = batch["attention_mask"].to(device)
                 gate_labels = batch["gate_labels"].to(device)
 
-                with torch.cuda.amp.autocast(enabled=use_amp):
+                with torch.amp.autocast("cuda", enabled=use_amp):
                     visual_tokens, text_tokens = model.encode(images, input_ids, attention_mask)
                     z = model.fusion(visual_tokens, text_tokens, attention_mask)
                 confidence = model.gate(z.float())
