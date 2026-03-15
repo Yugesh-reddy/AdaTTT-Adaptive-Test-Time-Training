@@ -36,7 +36,7 @@ train_optimizer: "adamw"
 train_weight_decay: 0.01
 train_scheduler: "cosine"
 train_warmup_ratio: 0.1
-gradient_checkpointing: true                     # For T4 memory
+gradient_checkpointing: true                     # Saves VRAM during training
 
 # === Training (Gate) ===
 gate_batch_size: 128
@@ -60,3 +60,11 @@ memotion2_data_dir: "data/memotion2/"
 checkpoint_dir: "checkpoints/"
 results_dir: "results/"
 figures_dir: "figures/"
+
+# === Latency Profiler ===
+latency_warmup_runs: 5
+latency_num_samples: 100
+
+# === Graceful Degradation ===
+fallback_ttt_timeout_ms: 500
+fallback_reduced_resolution: 160

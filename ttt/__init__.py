@@ -36,5 +36,29 @@ from ttt.utils import (
     count_parameters,
     set_seed,
 )
+from ttt.latency import LatencyProfiler, LatencyBudget
+from ttt.fallback import GracefulPredictor, FallbackResult, FallbackLevel
 
 __version__ = "0.1.0"
+
+__all__ = [
+    # Models
+    "FullVQAModel", "FusionModule", "ConfidenceGate", "PredictionHead",
+    "MaskedPatchProjection", "RotationHead", "load_frozen_vit", "load_frozen_bert",
+    # TTT
+    "TTTAdapter",
+    # Gate / Router
+    "AdaptiveRouter",
+    # Latency
+    "LatencyProfiler", "LatencyBudget",
+    # Fallback
+    "GracefulPredictor", "FallbackResult", "FallbackLevel",
+    # Data
+    "VQADataset", "VizWizDataset", "Memotion2Dataset", "build_memotion2_label_map",
+    # Metrics
+    "vqa_accuracy", "accuracy_by_question_type", "pareto_frontier",
+    "compute_gate_statistics", "mcnemar_test",
+    # Utils
+    "load_config", "save_json", "load_json", "save_checkpoint", "load_checkpoint",
+    "setup_logging", "get_device", "count_parameters", "set_seed",
+]
