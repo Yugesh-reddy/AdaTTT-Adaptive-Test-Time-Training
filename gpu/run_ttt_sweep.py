@@ -178,13 +178,13 @@ def main():
         B = images.shape[0]
 
         # Batch encode with AMP (fast, even for large batches)
-        with torch.cuda.amp.autocast(enabled=use_amp):
+        with torch.amp.autocast("cuda", enabled=use_amp):
             visual_tokens, text_tokens = model.encode(images, input_ids, attention_mask)
 
         if k == 0:
             # No TTT — batch predict (much faster than per-sample)
             with torch.no_grad():
-                with torch.cuda.amp.autocast(enabled=use_amp):
+                with torch.amp.autocast("cuda", enabled=use_amp):
                     logits, z = model.fuse_and_predict(
                         visual_tokens, text_tokens, attention_mask
                     )
