@@ -60,3 +60,11 @@ memotion2_data_dir: "data/memotion2/"
 checkpoint_dir: "checkpoints/"
 results_dir: "results/"
 figures_dir: "figures/"
+
+# === Latency Profiler ===
+latency_warmup_runs: 5
+latency_num_samples: 100
+
+# === Graceful Degradation ===
+fallback_ttt_timeout_ms: 500
+fallback_reduced_resolution: 160
