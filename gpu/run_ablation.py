@@ -157,7 +157,7 @@ def main():
         B = images.shape[0]
 
         # Batch encode with AMP
-        with torch.cuda.amp.autocast(enabled=use_amp):
+        with torch.amp.autocast("cuda", enabled=use_amp):
             visual_tokens, text_tokens = model.encode(images, input_ids, attention_mask)
 
         # TTT per-sample within the batch
