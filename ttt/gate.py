@@ -73,7 +73,7 @@ class AdaptiveRouter:
         device = images.device
 
         # 1. Encode all samples (with optional AMP)
-        with torch.cuda.amp.autocast(enabled=self.use_amp):
+        with torch.amp.autocast("cuda", enabled=self.use_amp):
             visual_tokens, text_tokens = self.model.encode(images, input_ids, attention_mask)
 
         # 2. Fuse → z for ALL samples
