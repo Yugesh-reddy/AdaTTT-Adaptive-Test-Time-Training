@@ -8,3 +8,4 @@ numpy
 matplotlib
 scipy
 tqdm
+gradio>=4.0
