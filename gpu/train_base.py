@@ -62,7 +62,7 @@ def evaluate(model, val_loader, device, use_amp=False):
             attention_mask = batch["attention_mask"].to(device)
             answers = batch["answer_idx"].to(device)
 
-            with torch.cuda.amp.autocast(enabled=use_amp):
+            with torch.amp.autocast("cuda", enabled=use_amp):
                 logits, confidence, z = model(images, input_ids, attention_mask)
             preds = logits.argmax(dim=-1)
 
@@ -219,7 +219,7 @@ def main():
     best_val_acc = 0.0
     checkpoint_dir = os.path.join(config.get("checkpoint_dir", "checkpoints/"), "base")
     os.makedirs(checkpoint_dir, exist_ok=True)
-    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
+    scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
     for epoch in range(start_epoch, epochs):
         model.train()
@@ -236,7 +236,7 @@ def main():
             answers = batch["answer_idx"].to(device)
 
             # Forward pass with mixed precision
-            with torch.cuda.amp.autocast(enabled=use_amp):
+            with torch.amp.autocast("cuda", enabled=use_amp):
                 logits, confidence, z = model(images, input_ids, attention_mask)
                 loss_vqa = F.cross_entropy(logits, answers)
 
