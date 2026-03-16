@@ -6,6 +6,7 @@ Uses mock objects — no HuggingFace downloads required.
 
 import pytest
 import torch
+import time
 
 from ttt.fallback import FallbackLevel, FallbackResult, GracefulPredictor
 
@@ -107,6 +108,39 @@ class TestGracefulPredictor:
         assert result.answer_idx >= 0
         assert result.logits is not None
         assert result.latency_ms > 0
+
+    def test_level0_timeout_falls_back_to_base(self, mock_components):
+        """Timeout in level 0 triggers BASE_ONLY fallback path."""
+        model, adapter, router, config = mock_components
+
+        def mock_encode(images, input_ids, attention_mask):
+            B, L = images.shape[0], attention_mask.shape[1]
+            return torch.randn(B, 197, 768), torch.randn(B, L, 768)
+
+        def mock_fuse_and_predict(visual_tokens, text_tokens, text_mask):
+            B = visual_tokens.shape[0]
+            return torch.randn(B, 100), torch.randn(B, 768)
+
+        model.encode = mock_encode
+        model.fuse_and_predict = mock_fuse_and_predict
+
+        class SlowRouter:
+            def predict(self, images, input_ids, attention_mask):
+                B = images.shape[0]
+                time.sleep(0.01)
+                return torch.randn(B, 100), {"skip_count": 0, "adapt_count": B}
+
+        predictor = GracefulPredictor(model, adapter, SlowRouter(), config)
+        images = torch.randn(1, 3, 224, 224)
+        input_ids = torch.ones(1, 20, dtype=torch.long)
+        attention_mask = torch.ones(1, 20, dtype=torch.long)
+
+        result = predictor.predict_with_fallback(
+            images, input_ids, attention_mask, ttt_timeout_ms=0.1
+        )
+        assert result.level == FallbackLevel.BASE_ONLY
+        assert "timeout" in result.reason.lower()
+        assert isinstance(result.answer_idx, int)
 
     def test_level3_on_router_error(self, mock_components):
         """Returns ERROR level when router raises non-OOM and base also fails."""

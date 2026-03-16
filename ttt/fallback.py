@@ -91,6 +91,7 @@ class GracefulPredictor:
         """
         timeout = ttt_timeout_ms if ttt_timeout_ms is not None else self.ttt_timeout_ms
         t0 = time.perf_counter()
+        level0_failure_reason = "unknown level-0 failure"
 
         # Level 0: Full AdaTTT
         try:
@@ -99,12 +100,10 @@ class GracefulPredictor:
             )
             elapsed_ms = (time.perf_counter() - t0) * 1000
 
-            # Check if we exceeded the timeout — if so, note it but still return
-            if elapsed_ms > timeout and routing_info["adapt_count"] > 0:
-                self._log_fallback(
-                    FallbackLevel.FULL_ADATTT,
-                    f"completed but exceeded timeout ({elapsed_ms:.0f}ms > {timeout}ms)",
-                    elapsed_ms,
+            # Timeout fallback only matters when TTT adaptation was actually used.
+            if elapsed_ms > timeout and routing_info.get("adapt_count", 0) > 0:
+                raise TimeoutError(
+                    f"TTT timeout exceeded ({elapsed_ms:.0f}ms > {timeout}ms)"
                 )
 
             answer_idx = logits.argmax(dim=-1)[0].item()
@@ -116,14 +115,20 @@ class GracefulPredictor:
                 latency_ms=elapsed_ms,
             )
 
-        except (RuntimeError, AssertionError) as e:
+        except (RuntimeError, AssertionError, TimeoutError) as e:
             elapsed_ms = (time.perf_counter() - t0) * 1000
 
-            if isinstance(e, RuntimeError) and "out of memory" in str(e).lower():
-                self._log_fallback(FallbackLevel.BASE_ONLY, f"CUDA OOM: {e}", elapsed_ms)
-                torch.cuda.empty_cache()
+            if isinstance(e, TimeoutError):
+                level0_failure_reason = str(e)
+                self._log_fallback(FallbackLevel.BASE_ONLY, level0_failure_reason, elapsed_ms)
+            elif isinstance(e, RuntimeError) and "out of memory" in str(e).lower():
+                level0_failure_reason = f"CUDA OOM: {e}"
+                self._log_fallback(FallbackLevel.BASE_ONLY, level0_failure_reason, elapsed_ms)
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
             else:
-                self._log_fallback(FallbackLevel.BASE_ONLY, f"{type(e).__name__}: {e}", elapsed_ms)
+                level0_failure_reason = f"{type(e).__name__}: {e}"
+                self._log_fallback(FallbackLevel.BASE_ONLY, level0_failure_reason, elapsed_ms)
 
         # Level 1: Base only (no TTT)
         try:
@@ -141,7 +146,7 @@ class GracefulPredictor:
                 answer_idx=answer_idx,
                 logits=logits.detach(),
                 level=FallbackLevel.BASE_ONLY,
-                reason="TTT skipped due to error; base prediction used",
+                reason=f"Level 0 failed ({level0_failure_reason}); base prediction used",
                 latency_ms=elapsed_ms,
             )
 
@@ -149,7 +154,8 @@ class GracefulPredictor:
             elapsed_ms = (time.perf_counter() - t1) * 1000
             if isinstance(e, RuntimeError) and "out of memory" in str(e).lower():
                 self._log_fallback(FallbackLevel.REDUCED_RESOLUTION, f"OOM at base: {e}", elapsed_ms)
-                torch.cuda.empty_cache()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
             else:
                 self._log_fallback(FallbackLevel.REDUCED_RESOLUTION, str(e), elapsed_ms)
 
