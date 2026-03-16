@@ -12,7 +12,7 @@ import logging
 import time
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -33,7 +33,7 @@ class FallbackLevel(IntEnum):
 class FallbackResult:
     """Result from graceful prediction."""
 
-    answer_idx: int
+    answer_idx: Union[int, List[int]]
     logits: Optional[torch.Tensor]
     level: FallbackLevel
     reason: str
@@ -71,6 +71,14 @@ class GracefulPredictor:
             f"Fallback to level {level.name}: {reason} (latency={latency_ms:.1f}ms)"
         )
 
+    @staticmethod
+    def _answer_idx_from_logits(logits: torch.Tensor) -> Union[int, List[int]]:
+        """Return int for single-sample outputs, list[int] for batched outputs."""
+        preds = logits.argmax(dim=-1)
+        if preds.numel() == 1:
+            return int(preds.item())
+        return [int(x) for x in preds.tolist()]
+
     def predict_with_fallback(
         self,
         images: torch.Tensor,
@@ -106,7 +114,7 @@ class GracefulPredictor:
                     f"TTT timeout exceeded ({elapsed_ms:.0f}ms > {timeout}ms)"
                 )
 
-            answer_idx = logits.argmax(dim=-1)[0].item()
+            answer_idx = self._answer_idx_from_logits(logits)
             return FallbackResult(
                 answer_idx=answer_idx,
                 logits=logits.detach(),
@@ -141,7 +149,7 @@ class GracefulPredictor:
                     visual_tokens, text_tokens, attention_mask,
                 )
             elapsed_ms = (time.perf_counter() - t1) * 1000
-            answer_idx = logits.argmax(dim=-1)[0].item()
+            answer_idx = self._answer_idx_from_logits(logits)
             return FallbackResult(
                 answer_idx=answer_idx,
                 logits=logits.detach(),
@@ -178,7 +186,7 @@ class GracefulPredictor:
                     visual_tokens, text_tokens, attention_mask,
                 )
             elapsed_ms = (time.perf_counter() - t2) * 1000
-            answer_idx = logits.argmax(dim=-1)[0].item()
+            answer_idx = self._answer_idx_from_logits(logits)
             return FallbackResult(
                 answer_idx=answer_idx,
                 logits=logits.detach(),

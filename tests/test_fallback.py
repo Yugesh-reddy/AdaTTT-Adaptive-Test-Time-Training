@@ -142,6 +142,27 @@ class TestGracefulPredictor:
         assert "timeout" in result.reason.lower()
         assert isinstance(result.answer_idx, int)
 
+    def test_batch_prediction_returns_all_indices(self, mock_components):
+        """Batched level-0 output returns one answer index per sample."""
+        model, adapter, router, config = mock_components
+
+        class MockRouter:
+            def predict(self, images, input_ids, attention_mask):
+                logits = torch.tensor([
+                    [0.0, 0.9, 0.1],
+                    [0.0, 0.2, 0.8],
+                ])
+                return logits, {"skip_count": 2, "adapt_count": 0}
+
+        predictor = GracefulPredictor(model, adapter, MockRouter(), config)
+        images = torch.randn(2, 3, 224, 224)
+        input_ids = torch.ones(2, 20, dtype=torch.long)
+        attention_mask = torch.ones(2, 20, dtype=torch.long)
+
+        result = predictor.predict_with_fallback(images, input_ids, attention_mask)
+        assert result.level == FallbackLevel.FULL_ADATTT
+        assert result.answer_idx == [1, 2]
+
     def test_level3_on_router_error(self, mock_components):
         """Returns ERROR level when router raises non-OOM and base also fails."""
         model, adapter, router, config = mock_components
