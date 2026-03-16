@@ -149,48 +149,48 @@ class TTTAdapter:
         # 2. Create a SEPARATE optimizer for TTT
         ttt_optimizer = torch.optim.Adam([p for _, p in named_ttt_params], lr=self.lr)
 
-        # 3. TTT gradient steps
+        # 3-5. Adapt, predict, and ALWAYS restore original params
         final_loss = 0.0
-        for step in range(self.k_steps):
-            ttt_optimizer.zero_grad()
+        try:
+            for step in range(self.k_steps):
+                ttt_optimizer.zero_grad()
 
-            # Compute self-supervised loss
-            if self.objective == "masked_patch":
-                loss = self.masked_patch_loss(visual_tokens, text_tokens, text_mask)
-            elif self.objective == "rotation":
-                loss = self.rotation_loss(images, text_tokens, text_mask)
-            else:
-                raise ValueError(f"Unknown TTT objective: {self.objective}")
+                # Compute self-supervised loss
+                if self.objective == "masked_patch":
+                    loss = self.masked_patch_loss(visual_tokens, text_tokens, text_mask)
+                elif self.objective == "rotation":
+                    loss = self.rotation_loss(images, text_tokens, text_mask)
+                else:
+                    raise ValueError(f"Unknown TTT objective: {self.objective}")
 
-            # Optionally add consistency regularization
-            if self.use_consistency:
-                cons_loss = self.consistency_loss(
-                    images, visual_tokens, text_tokens, text_mask
-                )
-                loss = loss + self.consistency_weight * cons_loss
+                # Optionally add consistency regularization
+                if self.use_consistency:
+                    cons_loss = self.consistency_loss(
+                        images, visual_tokens, text_tokens, text_mask
+                    )
+                    loss = loss + self.consistency_weight * cons_loss
 
-            loss.backward()
-            if self.grad_clip > 0:
-                torch.nn.utils.clip_grad_norm_(
-                    [p for _, p in named_ttt_params], max_norm=self.grad_clip
-                )
-            ttt_optimizer.step()
-            final_loss = loss.item()
+                loss.backward()
+                if self.grad_clip > 0:
+                    torch.nn.utils.clip_grad_norm_(
+                        [p for _, p in named_ttt_params], max_norm=self.grad_clip
+                    )
+                ttt_optimizer.step()
+                final_loss = loss.item()
 
-        # 4. Predict with adapted parameters
-        z_adapted = self.model.fusion(visual_tokens, text_tokens, text_mask)
+            # 4. Predict with adapted parameters
+            z_adapted = self.model.fusion(visual_tokens, text_tokens, text_mask)
 
-        # Optionally apply mixup anchoring
-        if self.use_mixup:
-            z_adapted = self.mixup_anchor(z_adapted, z_anchor)
+            # Optionally apply mixup anchoring
+            if self.use_mixup:
+                z_adapted = self.mixup_anchor(z_adapted, z_anchor)
 
-        logits = self.model.prediction_head(z_adapted)
-
-        # 5. RESTORE original parameters (CRITICAL)
-        for name, param in named_ttt_params:
-            param.data.copy_(anchor_state[name])
-
-        return logits.detach(), final_loss
+            logits = self.model.prediction_head(z_adapted)
+            return logits.detach(), final_loss
+        finally:
+            # Critical safety net: keep TTT strictly per-sample even on errors.
+            for name, param in named_ttt_params:
+                param.data.copy_(anchor_state[name])
 
     # ------------------------------------------------------------------
     # Self-supervised objectives

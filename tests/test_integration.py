@@ -94,6 +94,36 @@ class TestEndToEndPipeline:
         for n, p in model.fusion.named_parameters():
             assert torch.allclose(p.data, before[n]), f"Parameter {n} was not restored!"
 
+    def test_ttt_restores_params_on_exception(self, config, synthetic_batch):
+        """TTT restores parameters even if adaptation fails mid-loop."""
+        model = FullVQAModel(config)
+        adapter = TTTAdapter(model, config, objective="masked_patch", k_steps=2)
+
+        # Fail on the second objective call to ensure at least one optimizer step happened.
+        original_loss = adapter.masked_patch_loss
+        call_count = {"n": 0}
+
+        def failing_loss(*args, **kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 2:
+                raise RuntimeError("forced TTT failure")
+            return original_loss(*args, **kwargs)
+
+        adapter.masked_patch_loss = failing_loss
+
+        before = {n: p.data.clone() for n, p in model.fusion.named_parameters()}
+
+        with pytest.raises(RuntimeError, match="forced TTT failure"):
+            adapter.adapt_and_predict(
+                synthetic_batch["images"][:1],
+                synthetic_batch["visual_tokens"][:1],
+                synthetic_batch["text_tokens"][:1],
+                synthetic_batch["attention_mask"][:1],
+            )
+
+        for n, p in model.fusion.named_parameters():
+            assert torch.allclose(p.data, before[n]), f"Parameter {n} was not restored!"
+
     def test_gate_routing(self, config, synthetic_batch):
         """ConfidenceGate produces valid routing decisions."""
         model = FullVQAModel(config)
