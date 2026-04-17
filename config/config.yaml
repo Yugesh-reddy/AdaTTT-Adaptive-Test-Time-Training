@@ -1,0 +1,65 @@
+checkpoint_dir: checkpoints/
+consistency_augmentations:
+- random_crop
+- color_jitter
+consistency_weight: 0.1
+data_dir: data/
+dataset: vqa_v2
+fallback_reduced_resolution: 160
+fallback_ttt_timeout_ms: 500
+figures_dir: figures/
+fusion_dim: 768
+fusion_dropout: 0.1
+fusion_heads: 12
+fusion_layers: 2
+gate_batch_size: 128
+gate_epochs: 5
+gate_hidden: 256
+gate_lr: 0.0005
+gate_threshold_sweep:
+- 0.5
+- 0.7
+- 0.8
+- 0.9
+- 0.95
+gradient_checkpointing: true
+image_size: 224
+latency_num_samples: 100
+latency_warmup_runs: 5
+max_question_length: 20
+memotion2_data_dir: data/memotion2/
+memotion2_num_classes: 3
+mixup_alpha_range:
+- 0.7
+- 1.0
+num_answers: 3129
+prediction_hidden: 1024
+results_dir: results/
+seed: 42
+strict_images: true
+text_encoder: bert-base-uncased
+train_batch_size: 64
+train_epochs: 15
+train_lr: 0.0001
+train_optimizer: adamw
+train_scheduler: cosine
+train_split: train
+train_warmup_ratio: 0.1
+train_weight_decay: 0.01
+ttt_adapt_modules:
+- fusion
+- prediction_head
+ttt_grad_clip: 1.0
+ttt_k_steps_sweep:
+- 0
+- 1
+- 2
+- 3
+- 5
+ttt_lr: 0.0001
+ttt_mask_ratio: 0.25
+ttt_objectives:
+- masked_patch
+- rotation
+val_split: val
+vision_encoder: google/vit-base-patch16-224
