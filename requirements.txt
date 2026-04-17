@@ -1,0 +1,11 @@
+torch>=2.0
+torchvision>=0.15
+transformers>=4.36
+datasets
+pillow
+pyyaml
+numpy
+matplotlib
+scipy
+tqdm
+gradio>=4.0
