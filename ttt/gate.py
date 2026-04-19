@@ -1,0 +1,202 @@
+"""
+Adaptive routing logic for the Efficient TTT system.
+
+Routes test samples through the base path (SKIP) or TTT adaptation (ADAPT)
+based on the confidence gate's prediction.
+"""
+
+from typing import Any, Dict, List, Optional, Tuple
+
+import torch
+import torch.nn as nn
+
+
+class AdaptiveRouter:
+    """Routes samples through base model or TTT based on gate confidence.
+
+    Usage:
+        router = AdaptiveRouter(model, ttt_adapter, threshold=0.8)
+        predictions, routing_info = router.predict(images, input_ids, attention_mask)
+
+    Logic:
+        1. Encode all samples (frozen ViT + BERT)
+        2. Fuse → z for each
+        3. Gate: confidence = gate(z)
+        4. Split: high_conf → SKIP TTT, low_conf → ADAPT with TTT
+        5. Recombine predictions in original batch order
+    """
+
+    # FLOPs estimates (for ViT-B/16 + BERT-base, validated via scripts/05_measure_flops.py)
+    ENCODE_FLOPS = 40.1e9    # ViT (~17.6G) + BERT (~22.5G)
+    FUSION_FLOPS = 6.2e9     # 2-layer bidirectional cross-attention + FFN (measured)
+    PRED_FLOPS = 0.008e9     # Prediction head forward (measured)
+    TTT_STEP_FLOPS = 18.6e9  # Fusion fwd+bwd + pred fwd+bwd per step (~3x fwd)
+    SKIP_FLOPS = ENCODE_FLOPS + FUSION_FLOPS + PRED_FLOPS  # ~46.3 GFLOPs
+
+    # Consistency regularization overhead
+    # Effective cost with consistency = SKIP_FLOPS + CONSISTENCY_OVERHEAD_FLOPS
+    #   + k * (TTT_STEP_FLOPS + CONSISTENCY_PER_STEP_FLOPS)
+    CONSISTENCY_OVERHEAD_FLOPS = 2 * 17.6e9   # 2x ViT fwd (one-time precompute)
+    CONSISTENCY_PER_STEP_FLOPS = 2 * 6.2e9    # 2x extra fusion fwd per step (measured)
+
+    def __init__(
+        self,
+        model: nn.Module,
+        ttt_adapter: Any,
+        threshold: float = 0.8,
+        use_amp: bool = False,
+    ):
+        """
+        Args:
+            model: FullVQAModel instance (with encoders loaded).
+            ttt_adapter: TTTAdapter instance.
+            threshold: Gate threshold τ. High confidence > τ → SKIP.
+            use_amp: Enable mixed precision for encoding.
+        """
+        self.model = model
+        self.ttt_adapter = ttt_adapter
+        self.threshold = threshold
+        self.use_amp = use_amp
+
+    def predict(
+        self,
+        images: torch.Tensor,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+    ) -> Tuple[torch.Tensor, Dict[str, Any]]:
+        """Run adaptive prediction on a batch.
+
+        Args:
+            images: (B, 3, 224, 224)
+            input_ids: (B, L) — BERT token IDs
+            attention_mask: (B, L) — BERT attention mask
+
+        Returns:
+            predictions: (B, num_answers) — logits
+            routing_info: dict with skip/adapt counts, confidences, mask
+        """
+        # 1. Encode all samples (with optional AMP)
+        with torch.amp.autocast("cuda", enabled=self.use_amp):
+            visual_tokens, text_tokens = self.model.encode(images, input_ids, attention_mask)
+
+        return self._route_and_predict(
+            visual_tokens=visual_tokens,
+            text_tokens=text_tokens,
+            attention_mask=attention_mask,
+            images=images,
+        )
+
+    def predict_cached(
+        self,
+        visual_tokens: torch.Tensor,
+        text_tokens: torch.Tensor,
+        attention_mask: torch.Tensor,
+        images: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, Dict[str, Any]]:
+        """Run adaptive prediction using precomputed encoder features.
+
+        Use this when features were produced by gpu/precompute_features.py to
+        skip redundant ViT+BERT forwards.
+
+        Args:
+            visual_tokens: (B, 197, 768)
+            text_tokens: (B, L, 768)
+            attention_mask: (B, L)
+            images: (B, 3, 224, 224) or None. Required when the TTT objective
+                re-encodes images (e.g., rotation); not needed for masked_patch.
+        """
+        return self._route_and_predict(
+            visual_tokens=visual_tokens,
+            text_tokens=text_tokens,
+            attention_mask=attention_mask,
+            images=images,
+        )
+
+    def _route_and_predict(
+        self,
+        visual_tokens: torch.Tensor,
+        text_tokens: torch.Tensor,
+        attention_mask: torch.Tensor,
+        images: Optional[torch.Tensor],
+    ) -> Tuple[torch.Tensor, Dict[str, Any]]:
+        B = visual_tokens.shape[0]
+        device = visual_tokens.device
+
+        # 2. Fuse → z for ALL samples
+        z = self.model.fusion(visual_tokens.float(), text_tokens.float(), attention_mask)
+
+        # 3. Gate confidence
+        confidence = self.model.gate(z)  # (B, 1)
+        conf_values = confidence.squeeze(-1)  # (B,)
+        skip_mask = conf_values > self.threshold  # True = SKIP
+
+        skip_count = skip_mask.sum().item()
+        adapt_count = B - skip_count
+
+        # Initialize output
+        all_logits = torch.zeros(B, self.model.prediction_head.classifier[-1].out_features, device=device)
+
+        # 4a. Process SKIP samples (base prediction, no TTT)
+        if skip_count > 0:
+            skip_idx = skip_mask.nonzero(as_tuple=True)[0]
+            skip_z = z[skip_idx]
+            skip_logits = self.model.prediction_head(skip_z)
+            all_logits[skip_idx] = skip_logits
+
+        # 4b. Process ADAPT samples (TTT adaptation)
+        if adapt_count > 0:
+            adapt_idx = (~skip_mask).nonzero(as_tuple=True)[0]
+            # Run TTT independently per sample to preserve per-sample adaptation semantics.
+            for idx in adapt_idx.tolist():
+                sample_images = images[idx:idx + 1] if images is not None else None
+                sample_visual = visual_tokens[idx:idx + 1]
+                sample_text = text_tokens[idx:idx + 1]
+                sample_mask = (
+                    attention_mask[idx:idx + 1] if attention_mask is not None else None
+                )
+                sample_logits, _ = self.ttt_adapter.adapt_and_predict(
+                    sample_images, sample_visual, sample_text, sample_mask
+                )
+                all_logits[idx] = sample_logits.squeeze(0)
+
+        # 5. Build routing info
+        routing_info = {
+            "skip_count": int(skip_count),
+            "adapt_count": int(adapt_count),
+            "confidences": conf_values.detach().cpu(),
+            "skip_mask": skip_mask.detach().cpu(),
+        }
+
+        return all_logits, routing_info
+
+    def compute_flops(
+        self,
+        routing_info: Dict[str, Any],
+        k_steps: int,
+        use_consistency: bool = False,
+    ) -> float:
+        """Compute average FLOPs per sample for this batch.
+
+        Args:
+            routing_info: Dict from predict() with skip/adapt counts.
+            k_steps: Number of TTT steps used.
+            use_consistency: Whether consistency regularization was used
+                (adds ViT and fusion overhead to adapt cost).
+
+        Returns:
+            Average GFLOPs per sample.
+        """
+        n_skip = routing_info["skip_count"]
+        n_adapt = routing_info["adapt_count"]
+        total = n_skip + n_adapt
+
+        if total == 0:
+            return 0.0
+
+        adapt_flops = self.SKIP_FLOPS + k_steps * self.TTT_STEP_FLOPS
+        if use_consistency:
+            adapt_flops += self.CONSISTENCY_OVERHEAD_FLOPS
+            adapt_flops += k_steps * self.CONSISTENCY_PER_STEP_FLOPS
+        total_flops = n_skip * self.SKIP_FLOPS + n_adapt * adapt_flops
+
+        return (total_flops / total) / 1e9  # Convert to GFLOPs
