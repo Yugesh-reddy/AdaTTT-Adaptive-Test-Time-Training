@@ -1,0 +1,222 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+% The preceding line is only needed to identify funding in the first footnote. If that is unneeded, please comment it out.
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+\begin{document}
+
+\title{AdaTTT: Adaptive Test-Time Training for
+Efficient Visual Question Answering\\
+
+    
+}
+
+\author{
+\IEEEauthorblockN{Yugesh Reddy}
+\IEEEauthorblockA{\textit{Sappidi}\\
+                UIN: }
+        
+        
+\and
+\IEEEauthorblockN{Aishwarya Reddy}
+\IEEEauthorblockA{\textit{Chinthalapudi}\\
+        UIN: 665635004}
+
+\and
+\IEEEauthorblockN{Aryan}
+\IEEEauthorblockA{\textit{Shetty}\\
+        UIN: }
+
+}
+
+
+\maketitle
+
+
+\begin{abstract} Visual Question Answering models take an image and a natural language question as input and predict an answer. However, these models may fail when the test images are different from the training images, such as blurry photos, low-quality images, unusual objects, or OCR-heavy memes. Test-Time Training can help by adapting the model during inference, but applying it to every sample is expensive and can even hurt easy examples. This project proposes AdaTTT: Adaptive Test-Time Training for Efficient VQA, a framework that learns when adaptation is actually needed. AdaTTT uses frozen ViT-B/16 and BERT-base encoders, a trainable cross-modal fusion module, a prediction head, and a lightweight confidence gate. The gate decides whether a sample should skip adaptation and be answered directly, or go through test-time training before prediction. Experiments on VQA-v2 show that naïve always-on TTT increases computation and reduces accuracy, while AdaTTT avoids unnecessary adaptation by skipping most easy samples. The framework is also tested on Memotion2 to check whether the same architecture can generalize to meme sentiment classification. Overall, AdaTTT focuses on learning when to adapt, not just how to adapt.
+\end{abstract}
+
+
+\section{Introduction}
+
+Visual Question Answering, or VQA, is a task where a model receives an image and a question and predicts the correct answer. For example, if the image contains a red bus and the question is “What color is the bus?”, the model should answer “red.” VQA requires both image understanding and language understanding.
+
+Deep learning models usually perform well when the test data is similar to the training data. However, in real-world situations, test images may be different. They may have poor lighting, blur, new objects, or text-heavy content such as memes. This difference between training and testing data is called distribution shift. When distribution shift happens, frozen models can make incorrect predictions.
+
+Test-Time Training is one method used to handle this problem. In TTT, the model performs a few self-supervised learning steps on each test sample before giving the final answer. This can help the model adjust to difficult examples. However, TTT also has a major disadvantage: it requires extra computation. It can also harm performance on samples that the model already understands. Therefore, applying TTT to every test sample is not always useful.
+
+The main idea of AdaTTT is to make test-time training adaptive. Instead of adapting every sample, AdaTTT uses a confidence gate to decide whether adaptation is needed. Easy samples are answered directly, while difficult samples are adapted first. This helps balance accuracy and computation cost.
+
+
+\subsection{Problem Statement}
+
+Given an input image and question, the model predicts an answer from a fixed set of answer classes. In the VQA-v2 task, the model predicts from the top 3,129 most frequent answers. For Memotion2, the input is an image and OCR-extracted text, and the output is a sentiment label.
+
+Standard TTT applies adaptation to every sample, but this is inefficient. Many samples are already easy, so adapting them wastes computation and may disturb the model’s learned image-text alignment. AdaTTT solves this by using a learned confidence gate that routes each sample into either a fast path or a slow path.
+
+
+
+\section{Datasets}
+VQA-v2 is the primary dataset used in this project. It is a standard benchmark for Visual Question Answering. It contains image-question-answer pairs based on MS-COCO images. The questions are divided into three major types: yes/no, number, and other/open-ended questions.
+
+In the presentation, VQA-v2 is described as having 443,757 training questions, 214,354 validation questions, and 3,129 answer classes. This dataset is important because it has strong language priors, meaning some questions can often be answered using text patterns without needing much visual adaptation. This makes it useful for studying when TTT may actually hurt performance.
+
+VizWiz is mentioned in the proposal as an additional evaluation dataset. It contains questions from photos taken by blind users. These images often have natural real-world difficulties such as blur, poor lighting, and unclear objects. VizWiz is useful for testing robustness under distribution shift because the images are less controlled than standard benchmark images.
+
+Memotion2 is used for cross-task generalization. It is a multimodal meme dataset containing images and OCR-extracted text. Instead of predicting VQA answers, the model predicts sentiment-related labels. In the presentation, Memotion2 is simplified into three sentiment classes. This dataset tests whether the AdaTTT architecture can work beyond VQA by changing only the final prediction head.
+
+
+\section{METHOD}
+
+\textbf{Encoding}
+
+The image is passed through a frozen ViT-B/16 model. ViT stands for Vision Transformer, and it extracts visual features from the image.
+The question or OCR text is passed through a frozen BERT-base model. BERT extracts language features from the text.
+Both ViT and BERT are frozen, meaning their parameters are not updated during training or testing. This reduces computational cost and allows feature caching.
+
+\textbf{Cross-Modal Fusion}
+
+After image and text features are extracted, they are combined using a cross-modal fusion module. This module allows the image features and text features to interact.
+For example, if the question is “What is the man holding?”, the model must connect the word “holding” with the object near the man’s hands in the image. Cross-modal fusion helps the model focus on the relevant image regions based on the question.
+The proposal describes this fusion module as a 2-layer bidirectional cross-modal attention module. It produces a pooled representation vector that is used for both gating and prediction.
+
+\textbf{Confidence Gate}
+
+The confidence gate is the key contribution of AdaTTT. It is a small neural network that takes the fused representation and outputs a confidence score between 0 and 1.
+If the confidence score is greater than a threshold τ, the sample takes the SKIP path. This means the model answers directly without test-time adaptation.
+If the confidence score is less than or equal to τ, the sample takes the ADAPT path. This means the model performs test-time training before giving the final answer.
+
+\textbf{Prediction}
+
+For skipped samples, the prediction head directly predicts the answer from the fused representation.
+For adapted samples, the model first performs test-time training, then predicts the answer using the adapted representation.
+For VQA-v2, the prediction head outputs one of 3,129 answer classes. For Memotion2, the prediction head is changed to output one of three sentiment classes.
+
+
+\subsection{Model Training}
+\subsubsection{\textbf{Test-Time Training}}
+
+Test-Time Training is used only for samples that the gate marks as difficult.
+
+During TTT, the model performs a self-supervised task. The main self-supervised objective is masked patch prediction. In this method, some visual tokens are masked, and the model tries to reconstruct or predict the missing information.
+
+The presentation also mentions a rotation-based objective, where the image is rotated by 0°, 90°, 180°, or 270°, and the model predicts the rotation angle.
+
+Only the fusion module and prediction head are adapted during TTT. The ViT encoder, BERT encoder, and gate remain frozen. After prediction, the adapted parameters are restored to their original values. This restore step is very important because it prevents the model from drifting across samples.
+
+
+\subsubsection{\textbf{Regularization Techniques}}
+
+Test-time adaptation can be risky because the model may move too far from its trained parameters. This can cause catastrophic forgetting or unstable predictions. To reduce this risk, the project uses two stabilization techniques.
+
+\subsubsection{\textbf{Training Pipeline}}
+\textbf{Base Supervised Training}
+
+First, the base VQA model is trained in a normal supervised way. The input is image plus question, and the output is the correct answer. The model learns to predict answers using cross-entropy loss.
+
+The gate also receives a weak signal during this phase. It starts learning rough confidence, but it is not yet a true routing model.
+
+\subsubsection{\textbf{Oracle Gate Label Generation}}
+In the second phase, both the base model and the TTT model are run on a subset of training samples.
+The goal is to create labels for the gate:
+If the base model is correct, the sample is labeled SKIP.
+If the base model is wrong but TTT gives the correct answer, the sample is labeled ADAPT.
+If both are wrong, the sample is masked or ignored for gate training.
+This phase teaches the gate which samples actually benefit from TTT.
+
+\subsubsection{\textbf{Gate Refinement}}
+In the third phase, the fusion module and prediction head are frozen. Only the gate is trained using the oracle labels.
+This turns the gate from a simple confidence predictor into a real routing model. It learns when to skip and when to adapt.
+The threshold τ is then varied to study the tradeoff between accuracy and computation.
+
+\section{Results and Analysis}
+The presentation shows an important finding: naïve always-on TTT hurts performance on VQA-v2.
+
+The base model without TTT achieved about 49.56\% accuracy. When TTT was applied to every sample, accuracy decreased. With K=1 masked patch TTT, accuracy dropped by about 1.07 points and computation increased by about 40\%. With more TTT steps, the accuracy dropped even more and computation increased significantly.
+
+This shows that TTT is not always useful. On VQA-v2, many samples do not need visual adaptation because the model already understands them or because language priors are strong. Applying TTT to these samples can disturb the learned image-text alignment.
+
+AdaTTT solves this by using the gate to skip most samples. In the presentation, the gate skipped around 99\% of VQA samples at the best threshold. This means TTT only ran on a very small number of samples where it was more likely to help.
+
+The best adaptive point achieved almost the same accuracy as the base model while using only slightly more computation. More importantly, AdaTTT avoided the large accuracy drop caused by always-on TTT.
+
+On Memotion2, the routing behavior was different. The gate skipped around 50\% of samples, showing that it was not simply hard-coded to skip everything. Instead, it adapted its behavior based on the dataset. This supports the idea that the gate is data-driven and can generalize across tasks.
+
+
+
+\section{Future Works}
+
+
+
+For future work, the following directions can be explored:
+\begin{itemize}
+    \item First, the method should be tested on VizWiz, where distribution shift is stronger and TTT may provide more benefit.
+    \item Second, AdaTTT can be applied to medical VQA, where images are very different from general datasets and adaptation may be useful.
+    \item Third, better self-supervised objectives can be designed. Instead of only reconstructing visual patches, future methods can use text-conditioned masking so that adaptation respects the question.
+    \item Fourth, batch-level TTT can be explored to reduce cost by adapting over a batch of samples instead of one sample at a time.
+\end{itemize}
+
+These directions aim to refine the current system and expand its applicability to broader domains within music recommendation and classification tasks.
+
+\section{Key Findings}
+
+Naïve TTT is not always beneficial.
+Applying TTT to every sample increased computation and reduced accuracy on VQA-v2.
+The confidence gate is the main contribution.
+It learns when adaptation is useful and avoids unnecessary TTT.
+AdaTTT improves efficiency.
+It keeps performance close to the base model while avoiding the high cost of always-on TTT.
+The gate behaves differently across tasks.
+On VQA-v2, it skips most samples. On Memotion2, it adapts more often, showing cross-task flexibility.
+Mixup anchoring is safer than consistency regularization.
+Mixup helps control drift, while consistency regularization can introduce harmful noise.
+
+
+\section{Contribution}
+\begin{itemize}
+    \item \textbf{Aishwarya} - develops the base VQA system: frozen encoder integration, cross-modal fusion module design, supervised
+training of θf and θd, and TTT stabilization techniques
+
+    
+    \item \textbf{Yugesh} - develops the TTT adaptation loop (masked patch
+and rotation objectives), confidence gate training using oracle labels that compare base vs. TTT predictions, and
+evaluation infrastructure including Pareto analysis. 
+    
+    \item \textbf{Aryan} - evaluates AdaTTT on Memotion2 meme sentiment classification, testing cross-task generalization by swapping only the prediction head while reusing the shared frozen encoders and fusion module.
+
+
+
+
+\begin{thebibliography}{00}
+\bibitem{b1} 
+Y. Goyal, T. Khot, D. Summers-Stay, D. Batra, D. Parikh. Making the V in VQA Matter: Elevating the Role of Image Understanding in Visual Question Answering. CVPR, 2017.
+
+
+\bibitem{b2} 
+D. Gurari, Q. Li, A. Stangl, et al. VizWiz Grand Challenge: Answering Visual Questions from Blind People.CVPR, 2018.
+
+\bibitem{b3}
+C. Sharma, D. Bhageria, W. Scott, et al. SemEval-2020 Task 8: Memotion Analysis – The Visuo-Lingual Metaphor! Proceedings of SemEval, 2020.
+
+\bibitem{b4}
+A. Dosovitskiy, L. Beyer, A. Kolesnikov, et al. An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale. ICLR, 2021.
+
+\bibitem{b5}
+ J. Devlin, M.-W. Chang, K. Lee, K. Toutanova. BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding. NAACL, 2019.
+
+\bibitem{b6} 
+Y. Sun, X. Wang, Z. Liu, et al. Test-Time Training with Self-Supervision for Generalization under Distribution Shifts. ICML, 2020.
+
+
+
+
+
+\end{thebibliography}
+
+\end{document}
