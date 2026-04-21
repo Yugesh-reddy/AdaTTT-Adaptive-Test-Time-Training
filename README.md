@@ -1,154 +1,172 @@
-# Efficient TTT: Adaptive Test-Time Training for VQA
+# AdaTTT — Adaptive Test-Time Training for VQA
 
-An adaptive VQA system that learns to selectively apply test-time training using a confidence gate, producing a Pareto frontier of accuracy vs compute cost. Also evaluated on Memotion2 meme sentiment classification for cross-task generalization.
+A confidence-gated VQA system that decides *when* to do test-time training, so adaptation cost is paid only on samples that need it.
 
-**Authors:** Aishwarya Reddy Chinthalapudi, Yugesh Reddy Sappidi & Aryan Shetty
 **Course:** CS 518 — Deep Learning for Computer Vision (Prof. Sathya N. Ravi, UIC)
+**Authors:** Aishwarya Reddy Chinthalapudi, Yugesh Reddy Sappidi, Aryan Shetty
 
-## Key Results
+---
 
-| Configuration | VQA Accuracy | Avg GFLOPs | Skip Rate |
-|--------------|-------------|------------|-----------|
-| Base (no TTT) | X% | 40.9 | 100% |
-| TTT K=1 (masked patch) | X% | 44.1 | 0% |
-| Adaptive τ=0.8, K=1 | X% | X | X% |
+## Idea
 
-*Results will be filled after full training runs on H100.*
+Test-Time Training (TTT) takes a few self-supervised gradient steps on each test sample to improve accuracy, but it runs on every sample — including the easy ones. AdaTTT adds a learned confidence gate that routes each input either through a fast base path or through the TTT loop. The threshold τ is a runtime knob: one trained model gives you a Pareto frontier between speed and accuracy, no retraining required.
+
+---
+
+## Results
+
+Evaluated on VQA-v2 validation (214,354 samples) and Memotion2 (2,797 samples, cross-task).
+
+### VQA-v2 — accuracy vs. compute
+
+| Configuration | Accuracy (95% CI) | Avg GFLOPs | Skip Rate |
+|---|---|---|---|
+| Base (no TTT) | 0.4956 ± 0.002 | 46.31 | 100% |
+| TTT K=1, all samples | 0.4849 ± 0.002 | 64.91 | 0% |
+| **AdaTTT τ=0.95, K=1** | **0.4952 ± 0.002** | **47.34** | **94.5%** |
+| AdaTTT τ=0.9, K=1 | 0.4956 ± 0.002 | 46.49 | 99.0% |
+| TTT K=3, all samples | 0.4666 ± 0.002 | 102.11 | 0% |
+| TTT K=5, all samples | 0.4648 ± 0.002 | 139.31 | 0% |
+
+The gate at τ=0.95 matches base accuracy at ~+1 GFLOP. Naively running more TTT steps on every sample actually *hurts* accuracy, which is the result the gate is built to address.
+
+### Memotion2 — cross-task transfer
+
+| Setting | Accuracy | Skip Rate |
+|---|---|---|
+| AdaTTT τ=0.8, K=1 | 0.7165 | 50.1% |
+
+The gate trained on VQA-v2 transfers to meme sentiment without retraining.
+
+### Latency (H100, batch=1, FP16)
+
+| Stage | p50 (ms) | p95 (ms) |
+|---|---|---|
+| Image preprocess | 3.0 | 3.4 |
+| ViT-B/16 (frozen) | 7.9 | 8.3 |
+| BERT-base (frozen) | 10.6 | 11.1 |
+| Fusion + predict | 4.0 | 4.2 |
+| TTT step (when triggered) | 0.0 | 18.8 |
+| **End-to-end** | **25.9** | **45.0** |
+
+---
 
 ## Architecture
 
 ```
-Image + Question → [Frozen ViT + BERT] → Cross-Modal Fusion → Confidence Gate
-                                                                    │
-                                           ┌────────────────────────┤
-                                           │ SKIP (confident)       │ ADAPT (uncertain)
-                                           ↓                        ↓
-                                     Prediction MLP          TTT Adaptation (K steps)
-                                           ↓                        ↓
-                                         Answer                   Answer
+   Image ─▶ Frozen ViT-B/16 ─┐
+                             ├─▶ Fusion Transformer ─▶ Confidence Gate
+   Question ─▶ Frozen BERT ──┘                              │
+                                                ┌───────────┴───────────┐
+                                          conf ≥ τ                 conf < τ
+                                            │                          │
+                                       Prediction MLP           TTT Loop (K steps)
+                                            │                  ├─ Masked patch SSL
+                                            │                  ├─ Rotation
+                                            │                  ├─ Consistency
+                                            │                  └─ MixUp
+                                            ▼                          ▼
+                                          Answer                    Answer
 ```
 
-## Project Structure
+Encoders stay frozen; TTT only updates the fusion + prediction head. The gate is supervised on prediction-correctness *deltas* between base and TTT-adapted forward passes — it learns "would TTT help here?" rather than "is the base right?", which is what makes it transfer.
+
+---
+
+## Repository
 
 ```
-AdaTTT/
-├── config/config.yaml          # All hyperparameters
-├── ttt/                        # Core Python package
-│   ├── models.py               # FusionModule, ConfidenceGate, PredictionHead, FullVQAModel
-│   ├── ttt_loop.py             # TTT adaptation (masked patch, rotation, consistency, mixup)
-│   ├── gate.py                 # AdaptiveRouter (skip/adapt routing)
-│   ├── data.py                 # VQA-v2 / VizWiz / Memotion2 dataset classes
-│   ├── metrics.py              # VQA accuracy, Pareto frontier, McNemar's test
-│   ├── utils.py                # Config, checkpointing, I/O
-│   ├── latency.py              # LatencyProfiler + LatencyBudget
-│   └── fallback.py             # GracefulPredictor (4-level degradation)
-├── scripts/                    # Local CLI scripts (no GPU)
-│   ├── 01_prepare_data.py      # Download & preprocess
-│   ├── 02_analyze_results.py   # Compute metrics
-│   ├── 03_generate_figures.py  # 11 publication figures
-│   └── 04_generate_gate_labels.py  # Gate label generation
-├── gpu/                        # Colab GPU scripts
-│   ├── train_base.py           # Train base VQA model
-│   ├── train_gate.py           # Refine confidence gate
-│   ├── run_ttt_sweep.py        # Sweep K × objective
-│   ├── run_inference.py        # Adaptive inference
-│   ├── run_ablation.py         # Stabilization ablation
-│   ├── run_component_ablation.py  # Which-modules-to-adapt ablation
-│   ├── run_gate_sweep.py       # Single-pass threshold sweep
-│   ├── run_warmup_analysis.py  # TTT warmup cost analysis
-│   └── run_latency_profile.py  # Per-stage latency profiling
-├── demo/app.py                 # Gradio interactive demo
-├── notebooks/colab_runner.ipynb # Colab notebook
-├── tests/                      # Unit + integration tests
-└── setup.py                    # pip install -e .
+config/config.yaml          single source of truth for all hyperparameters
+ttt/                        models, TTT loop, gate, data, metrics, latency, fallback
+scripts/                    CPU: data prep, analysis, figures, gate labels
+gpu/                        GPU: train, sweep, inference, ablation, profiling
+demo/app.py                 Gradio demo
+notebooks/                  hybrid Colab/local runner + tiny-dataset demo
+report/                     IEEE conference paper (LaTeX + PDF)
+figures/  results/  tests/  9 figures, JSON results with CIs, 94 tests
 ```
 
-## Hybrid Workflow
+24 Python modules, ~8.6K LOC, 94 tests, 9 figures.
 
-If you are using the VS Code Colab extension, the intended setup is one notebook with kernel switching:
+---
 
-- Local Python kernel for CPU-friendly cells
-- Colab GPU kernel for training and heavy inference cells
+## Reproducing
 
-Open [notebooks/colab_runner.ipynb](</Users/yugesh/Library/CloudStorage/GoogleDrive-yugeshreddysappidi@gmail.com/My Drive/AdaTTT/notebooks/colab_runner.ipynb>) in VS Code and follow the section labels. The notebook now marks each executable section as either `Local CPU` or `Colab GPU`, and the code cells include runtime guards so you do not accidentally run a GPU stage on the local kernel or vice versa.
-
-Recommended order:
-
-1. `Local CPU`: install dependencies, run tests, prepare data, download COCO images
-2. `Colab GPU`: train the base model and run validation TTT sweeps
-3. `Colab GPU`: run the train-split sweeps that create prediction files for gate labels
-4. `Local CPU`: generate gate labels
-5. `Colab GPU`: train the confidence gate and run adaptive inference
-6. `Local CPU`: analyze results, generate figures, and launch Gradio
-
-If you want the same commands outside the notebook, they are:
+CPU only — runs the test suite and the tiny demo:
 
 ```bash
-python -m pytest tests/ -q
+pip install -e .
+pytest tests/ -q
+jupyter lab notebooks/tiny_dataset_demo.ipynb
+```
+
+Full pipeline (H100 recommended):
+
+```bash
 python scripts/01_prepare_data.py --config config/config.yaml
-python scripts/04_generate_gate_labels.py --config config/config.yaml --split train
-python scripts/02_analyze_results.py --config config/config.yaml
-python scripts/03_generate_figures.py --config config/config.yaml
-python demo/app.py --checkpoint checkpoints/base/best.pt --gate-checkpoint checkpoints/gate/best.pt
-```
-
-GPU stages:
-
-```bash
 python gpu/train_base.py --config config/config.yaml
 python gpu/run_ttt_sweep.py --checkpoint checkpoints/base/best.pt --k 1 --objective masked_patch
+python scripts/04_generate_gate_labels.py --config config/config.yaml --split train
 python gpu/train_gate.py --base-checkpoint checkpoints/base/best.pt --split train
-python gpu/run_inference.py --base-checkpoint checkpoints/base/best.pt --gate-checkpoint checkpoints/gate/best.pt --threshold 0.8 --k 1
+python gpu/run_inference.py \
+    --base-checkpoint checkpoints/base/best.pt \
+    --gate-checkpoint checkpoints/gate/best.pt \
+    --threshold 0.8 --k 1
+python scripts/02_analyze_results.py --config config/config.yaml
+python scripts/03_generate_figures.py --config config/config.yaml
 ```
 
-## Demo
+`gpu/precompute_features.py` caches frozen encoder activations; downstream eval scripts accept `--features` for a 5–10× speedup on sweeps.
 
-Launch the interactive Gradio demo:
+Demo:
+
 ```bash
 python demo/app.py --checkpoint checkpoints/base/best.pt --gate-checkpoint checkpoints/gate/best.pt
 ```
-Upload an image, type a question, and adjust TTT steps / gate threshold to explore the accuracy-latency tradeoff in real time.
 
-## Experiments & Findings
+The Gradio UI exposes τ and K as sliders so you can move along the Pareto frontier interactively.
 
-### Latency Budget
-Profile per-stage latency with:
-```bash
-!python gpu/run_latency_profile.py --checkpoint checkpoints/base/best.pt --k 1
+---
+
+## Notes on the implementation
+
+- Every reported number ships with a 95% bootstrap CI; pairwise comparisons use McNemar's test (`ttt/metrics.py`).
+- `ttt/latency.py` includes a `LatencyBudget` context manager that falls through to the base path if a TTT step would exceed a configured wall-clock SLO.
+- `ttt/fallback.py` implements a 4-level degradation chain (Full AdaTTT → Base → Reduced resolution → Error) for inference under load.
+- Hyperparameters live entirely in `config/config.yaml`; seeds are pinned across NumPy, PyTorch, CUDA, and `random`.
+
+---
+
+## Findings
+
+1. More TTT is not better — K=3 and K=5 on every sample underperform the base model on VQA-v2.
+2. The gate transfers across tasks without retraining (VQA-v2 → Memotion2).
+3. Among the four SSL objectives, masked-patch and mixup are roughly tied; consistency-only is weakest.
+4. τ ∈ [0.9, 0.95] gives base accuracy at <2% compute overhead.
+
+Full discussion in `report/conference_101719.pdf`.
+
+---
+
+## Stack
+
+PyTorch 2.0+, HuggingFace Transformers (ViT-B/16, BERT-base), Gradio, pytest, Colab (H100), LaTeX (IEEEtran).
+
+---
+
+## Citation
+
+```bibtex
+@inproceedings{adattt2026,
+  title     = {AdaTTT: Adaptive Test-Time Training for Visual Question Answering},
+  author    = {Chinthalapudi, Aishwarya Reddy and Sappidi, Yugesh Reddy and Shetty, Aryan},
+  booktitle = {CS 518 Final Project, University of Illinois Chicago},
+  year      = {2026}
+}
 ```
-See Figure 8 for the stacked latency breakdown.
 
-### Graceful Degradation
-The `GracefulPredictor` provides a 4-level fallback chain (Full AdaTTT → Base Only → Reduced Resolution → Error) for production robustness.
+---
 
-### Component Ablation
-```bash
-!python gpu/run_component_ablation.py --checkpoint checkpoints/base/best.pt --k 1 --mode fusion_only
-```
-Tests which modules benefit most from TTT adaptation.
+## Contact
 
-### Gate Threshold Sweep
-```bash
-!python gpu/run_gate_sweep.py --checkpoint checkpoints/base/best.pt --k 1
-```
-Efficient single-pass sweep over all thresholds.
-
-### TTT Warmup Analysis
-```bash
-!python gpu/run_warmup_analysis.py --checkpoint checkpoints/base/best.pt --k 1 --mode cumulative
-```
-Tests whether accumulated TTT adaptations help or hurt.
-
-## Tests
-
-```bash
-python -m pytest tests/ -v
-```
-
-## Requirements
-
-- Python 3.10+
-- PyTorch >= 2.0
-- Transformers >= 4.36
-- Gradio >= 4.0 (for demo)
-- Google Colab Pro (H100) for GPU tasks
+Yugesh Reddy Sappidi — yugeshreddysappidi@gmail.com
