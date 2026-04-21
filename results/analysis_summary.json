@@ -1,0 +1,139 @@
+{
+  "results": [
+    {
+      "config": "K=0 (no TTT)",
+      "accuracy": 0.7164819449410083,
+      "accuracy_ci_lower": 0.6992938863067573,
+      "accuracy_ci_upper": 0.7325706113693242,
+      "accuracy_ci_width": 0.03327672506256696,
+      "avg_flops": 46.308,
+      "type_accuracy": {
+        "sentiment": 0.7164819449410083
+      }
+    },
+    {
+      "config": "K=0, unknown",
+      "accuracy": 0.95224,
+      "accuracy_ci_lower": 0.95026,
+      "accuracy_ci_upper": 0.95406,
+      "accuracy_ci_width": 0.0038000000000000256,
+      "avg_flops": 46.308,
+      "type_accuracy": {
+        "number": 0.9131291691934506,
+        "other": 0.9911874773650959,
+        "yes/no": 0.9139761763596184
+      }
+    },
+    {
+      "config": "K=1, masked_patch",
+      "accuracy": 0.93208,
+      "accuracy_ci_lower": 0.9297395,
+      "accuracy_ci_upper": 0.93422,
+      "accuracy_ci_width": 0.004480499999999998,
+      "avg_flops": 64.908,
+      "type_accuracy": {
+        "number": 0.864463311097635,
+        "other": 0.9829785521709388,
+        "yes/no": 0.8879426507842397
+      }
+    },
+    {
+      "config": "K=0, unknown",
+      "accuracy": 0.49556341379213825,
+      "accuracy_ci_lower": 0.4934167312016571,
+      "accuracy_ci_upper": 0.49761609300502907,
+      "accuracy_ci_width": 0.004199361803371993,
+      "avg_flops": 46.308,
+      "type_accuracy": {
+        "number": 0.327432999218028,
+        "other": 0.4311925737374502,
+        "yes/no": 0.6387554164959461
+      }
+    },
+    {
+      "config": "K=1, masked_patch",
+      "accuracy": 0.4849128077852524,
+      "accuracy_ci_lower": 0.4826211547253609,
+      "accuracy_ci_upper": 0.4868920104126819,
+      "accuracy_ci_width": 0.004270855687320996,
+      "avg_flops": 64.908,
+      "type_accuracy": {
+        "number": 0.31193573611999714,
+        "other": 0.4217583436633579,
+        "yes/no": 0.6282017854260563
+      }
+    },
+    {
+      "config": "K=1, rotation",
+      "accuracy": 0.4719156162236301,
+      "accuracy_ci_lower": 0.4696617511219758,
+      "accuracy_ci_upper": 0.4740990371068419,
+      "accuracy_ci_width": 0.004437285984866146,
+      "avg_flops": 64.908,
+      "type_accuracy": {
+        "number": 0.3069950949029644,
+        "other": 0.412220024792059,
+        "yes/no": 0.6078519015159981
+      }
+    },
+    {
+      "config": "K=3, masked_patch",
+      "accuracy": 0.4666486279705534,
+      "accuracy_ci_lower": 0.4644417645576943,
+      "accuracy_ci_upper": 0.4687295315226214,
+      "accuracy_ci_width": 0.004287766964927109,
+      "avg_flops": 102.108,
+      "type_accuracy": {
+        "number": 0.28829885547735834,
+        "other": 0.3990102101647442,
+        "yes/no": 0.6176978185023777
+      }
+    },
+    {
+      "config": "K=5, masked_patch",
+      "accuracy": 0.46484786847924464,
+      "accuracy_ci_lower": 0.4627344252964722,
+      "accuracy_ci_upper": 0.4669525644494621,
+      "accuracy_ci_width": 0.004218139152989908,
+      "avg_flops": 139.308,
+      "type_accuracy": {
+        "number": 0.29363048268998365,
+        "other": 0.3954144153521513,
+        "yes/no": 0.6157609168001391
+      }
+    }
+  ],
+  "pareto_frontier": [
+    {
+      "config": "K=0 (no TTT)",
+      "accuracy": 0.7164819449410083,
+      "accuracy_ci_lower": 0.6992938863067573,
+      "accuracy_ci_upper": 0.7325706113693242,
+      "accuracy_ci_width": 0.03327672506256696,
+      "avg_flops": 46.308,
+      "type_accuracy": {
+        "sentiment": 0.7164819449410083
+      }
+    },
+    {
+      "config": "K=0, unknown",
+      "accuracy": 0.95224,
+      "accuracy_ci_lower": 0.95026,
+      "accuracy_ci_upper": 0.95406,
+      "accuracy_ci_width": 0.0038000000000000256,
+      "avg_flops": 46.308,
+      "type_accuracy": {
+        "number": 0.9131291691934506,
+        "other": 0.9911874773650959,
+        "yes/no": 0.9139761763596184
+      }
+    }
+  ],
+  "memotion2_results": [
+    {
+      "config": "Memotion2 K=1, masked_patch",
+      "accuracy": 0.7164819449410083,
+      "num_samples": 2797
+    }
+  ]
+}
