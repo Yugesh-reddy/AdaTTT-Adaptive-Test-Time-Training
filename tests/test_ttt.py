@@ -178,3 +178,4 @@ class TestTTTChangesPrediction:
         assert not torch.allclose(logits_k0, logits_k3, atol=1e-4), (
             "TTT with K=3 should produce different logits than K=0"
         )
+# Run full test suite pass and fix warnings

@@ -90,12 +90,12 @@ class TestFusionModule:
         assert seq.shape == (4, 197, 768)
 
     def test_parameter_count(self):
-        """Fusion module has substantial parameters (2 layers × dual-stream)."""
-        fusion = FusionModule(dim=768, num_heads=12, num_layers=2)
+        """Fusion module has substantial parameters (6 layers × dual-stream + query pooling)."""
+        fusion = FusionModule(dim=768, num_heads=12, num_layers=6, num_query_tokens=32)
         count = sum(p.numel() for p in fusion.parameters())
-        # 2 layers × (2 cross-attn + 2 FFN with 4x expansion) ≈ 28M
-        assert count > 20_000_000
-        assert count < 35_000_000
+        # 6 layers × (2 cross-attn + 2 FFN) + query-based pooling with projection ≈ 106M
+        assert count > 80_000_000
+        assert count < 130_000_000
 
 
 class TestConfidenceGate:

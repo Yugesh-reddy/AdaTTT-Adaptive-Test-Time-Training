@@ -118,3 +118,4 @@ class TestCachedFeaturesDataset:
         torch.save(bad, path)
         with pytest.raises(ValueError, match="missing required key"):
             CachedFeaturesDataset(features_path=path, load_images=False)
+# Add cached features test suite coverage

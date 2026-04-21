@@ -158,3 +158,4 @@ class TestMcNemarTest:
         result = mcnemar_test(base, ttt, gt)
         assert result["b_base_correct_ttt_wrong"] == 0
         assert result["c_base_wrong_ttt_correct"] == 9
+# Update test_metrics with edge case coverage
