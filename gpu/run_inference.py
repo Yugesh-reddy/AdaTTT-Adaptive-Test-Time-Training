@@ -43,7 +43,7 @@ from ttt.data import (
     vqa_collate_fn, cached_vqa_collate_fn,
     load_answer_vocab, build_memotion2_label_map,
 )
-from ttt.metrics import vqa_accuracy, compute_gate_statistics
+from ttt.metrics import vqa_accuracy, compute_gate_statistics, prediction_record
 from ttt.utils import (
     load_config,
     load_checkpoint,
@@ -52,6 +52,18 @@ from ttt.utils import (
     get_device,
     set_seed,
 )
+
+
+
+def _soft_scores(batch, i):
+    """Per-answer soft scores for sample i, when the loader provides them.
+
+    Carrying these into the results file is what keeps vqa_accuracy_soft
+    applicable after the fact; without them a run can only ever be scored by
+    exact match.
+    """
+    scores = batch.get("answer_scores")
+    return None if scores is None else scores[i].tolist()
 
 
 def main():
@@ -201,14 +213,13 @@ def main():
         confidences = routing_info["confidences"]
 
         for i in range(answers.size(0)):
-            all_predictions.append({
-                "sample_id": batch["sample_ids"][i],
-                "prediction": preds[i].item(),
-                "ground_truth": answers[i].item(),
-                "question_type": batch["question_types"][i],
-                "skipped": bool(skip_mask[i]),
-                "confidence": float(confidences[i]),
-            })
+            all_predictions.append(prediction_record(
+                batch["sample_ids"][i], preds[i].item(), answers[i].item(),
+                batch["question_types"][i],
+                answer_scores=_soft_scores(batch, i),
+                skipped=bool(skip_mask[i]),
+                confidence=float(confidences[i]),
+            ))
 
     elapsed = time.time() - t0
     accuracy = correct / total if total > 0 else 0.0

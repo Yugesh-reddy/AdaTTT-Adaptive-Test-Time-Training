@@ -628,30 +628,61 @@ class FullVQAModel(nn.Module):
             seen.add(name)
         return modules
 
+    @staticmethod
+    def _layernorm_param_names(module: nn.Module) -> set:
+        """Names of every LayerNorm affine inside `module`, relative to it.
+
+        Used by the layernorm_only selection. LayerNorms constructed with
+        elementwise_affine=False contribute nothing and are skipped naturally.
+        """
+        names = set()
+        for sub_name, sub in module.named_modules():
+            if isinstance(sub, nn.LayerNorm):
+                for param_name, _ in sub.named_parameters(recurse=False):
+                    names.add(f"{sub_name}.{param_name}" if sub_name else param_name)
+        return names
+
     def get_ttt_params(
         self,
         adapt_modules: Optional[List[str]] = None,
         include_auxiliary: bool = False,
+        layernorm_only: bool = False,
     ) -> List[torch.nn.Parameter]:
         """Get parameters that TTT can update.
 
         Args:
             adapt_modules: Optional explicit module names to adapt.
             include_auxiliary: Whether auxiliary TTT heads are valid module names.
+            layernorm_only: Restrict to LayerNorm affine parameters (γ, β).
         """
-        params: List[torch.nn.Parameter] = []
-        for _, module in self._resolve_ttt_modules(adapt_modules, include_auxiliary):
-            params.extend(list(module.parameters()))
-        return params
+        return [
+            param
+            for _, param in self.get_ttt_params_named(
+                adapt_modules, include_auxiliary, layernorm_only
+            )
+        ]
 
     def get_ttt_params_named(
         self,
         adapt_modules: Optional[List[str]] = None,
         include_auxiliary: bool = False,
+        layernorm_only: bool = False,
     ) -> List[Tuple[str, torch.nn.Parameter]]:
-        """Get named parameters for TTT (for save/restore)."""
+        """Get named parameters for TTT (for save/restore).
+
+        Args:
+            adapt_modules: Optional explicit module names to adapt.
+            include_auxiliary: Whether auxiliary TTT heads are valid module names.
+            layernorm_only: Restrict to LayerNorm affine parameters. This shrinks
+                the hypothesis space fitted from a single test sample — it does
+                NOT reduce backward FLOPs, since gradients still traverse the
+                full stack to reach the affines.
+        """
         params: List[Tuple[str, torch.nn.Parameter]] = []
         for module_name, module in self._resolve_ttt_modules(adapt_modules, include_auxiliary):
+            keep = self._layernorm_param_names(module) if layernorm_only else None
             for name, param in module.named_parameters():
+                if keep is not None and name not in keep:
+                    continue
                 params.append((f"{module_name}.{name}", param))
         return params

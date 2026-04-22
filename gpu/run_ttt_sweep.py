@@ -36,6 +36,7 @@ from tqdm import tqdm
 
 from ttt.models import FullVQAModel
 from ttt.ttt_loop import TTTAdapter
+from ttt.metrics import prediction_record
 from ttt.data import (
     VQADataset, Memotion2Dataset, CachedFeaturesDataset,
     vqa_collate_fn, cached_vqa_collate_fn,
@@ -50,6 +51,18 @@ from ttt.utils import (
     get_device,
     set_seed,
 )
+
+
+
+def _soft_scores(batch, i):
+    """Per-answer soft scores for sample i, when the loader provides them.
+
+    Carrying these into the results file is what keeps vqa_accuracy_soft
+    applicable after the fact; without them a run can only ever be scored by
+    exact match.
+    """
+    scores = batch.get("answer_scores")
+    return None if scores is None else scores[i].tolist()
 
 
 def main():
@@ -222,13 +235,12 @@ def main():
                 sid = batch["sample_ids"][i]
                 if sid in processed_ids:
                     continue
-                all_predictions.append({
-                    "sample_id": sid,
-                    "prediction": preds[i].item(),
-                    "ground_truth": answers[i].item(),
-                    "question_type": batch["question_types"][i],
-                    "ttt_loss": 0.0,
-                })
+                all_predictions.append(prediction_record(
+                    sid, preds[i].item(), answers[i].item(),
+                    batch["question_types"][i],
+                    answer_scores=_soft_scores(batch, i),
+                    ttt_loss=0.0,
+                ))
                 correct += (preds[i] == answers[i]).item()
                 total += 1
                 new_samples += 1
@@ -247,13 +259,12 @@ def main():
                     attention_mask[i:i + 1],
                 )
                 pred = sample_logits.argmax(dim=-1)
-                all_predictions.append({
-                    "sample_id": sid,
-                    "prediction": pred.item(),
-                    "ground_truth": answers[i].item(),
-                    "question_type": batch["question_types"][i],
-                    "ttt_loss": float(ttt_loss),
-                })
+                all_predictions.append(prediction_record(
+                    sid, pred.item(), answers[i].item(),
+                    batch["question_types"][i],
+                    answer_scores=_soft_scores(batch, i),
+                    ttt_loss=float(ttt_loss),
+                ))
                 correct += (pred == answers[i]).item()
                 total += 1
                 new_samples += 1

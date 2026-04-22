@@ -27,7 +27,13 @@ class AdaptiveRouter:
     """
 
     # FLOPs estimates (for ViT-B/16 + BERT-base, validated via scripts/05_measure_flops.py)
-    ENCODE_FLOPS = 40.1e9    # ViT (~17.6G) + BERT (~22.5G)
+    # Split by tower: augmentation re-encodes the image only, so the two halves
+    # have to be priced separately. Swapping BERT for CLIP's text tower drops
+    # TEXT_ENCODE_FLOPS from ~22.5G to ~1G at 20-token questions — re-measure
+    # both before reporting any v2 number.
+    IMAGE_ENCODE_FLOPS = 17.6e9
+    TEXT_ENCODE_FLOPS = 22.5e9
+    ENCODE_FLOPS = IMAGE_ENCODE_FLOPS + TEXT_ENCODE_FLOPS  # 40.1G
     FUSION_FLOPS = 6.2e9     # 2-layer bidirectional cross-attention + FFN (measured)
     PRED_FLOPS = 0.008e9     # Prediction head forward (measured)
     TTT_STEP_FLOPS = 18.6e9  # Fusion fwd+bwd + pred fwd+bwd per step (~3x fwd)
@@ -185,6 +191,53 @@ class AdaptiveRouter:
         }
 
         return all_logits, routing_info
+
+    @staticmethod
+    def sample_flops(
+        adapted: bool,
+        n_aug: int = 0,
+        k_steps: int = 1,
+        layernorm_only: bool = False,
+    ) -> float:
+        """FLOPs for ONE request on the deployment path.
+
+        Priced from what a served request actually executes, never from what a
+        benchmark happens to read out of a feature cache. In v1 the cascade cost
+        model charged escalated requests only the expensive tier and omitted the
+        cheap-tier encode every request had already run, which made the savings
+        look real at any escalation rate. The v2 shape of that mistake is
+        treating augmented views as free because they were precomputed offline.
+
+        Every request pays the base forward. An adapted request additionally
+        pays, for each augmented view, an image-tower encode plus a fusion and
+        head forward — the text tower is encoded once and reused, since AugMix
+        perturbs pixels only.
+
+        Args:
+            adapted: Whether the gate fired for this sample.
+            n_aug: Augmented views used by the adaptation objective (MEMO uses 4).
+            k_steps: TTT gradient steps.
+            layernorm_only: Accepted and deliberately ignored in the arithmetic.
+                Restricting updates to LayerNorm affines shrinks optimizer state
+                and the fitted hypothesis space; gradients still traverse the
+                whole stack, so the backward costs the same. The 2,886x parameter
+                ratio is not a compute saving and must not be reported as one.
+
+        Returns:
+            FLOPs for this request.
+        """
+        cost = AdaptiveRouter.SKIP_FLOPS
+        if not adapted:
+            return cost
+
+        per_view = (
+            AdaptiveRouter.IMAGE_ENCODE_FLOPS
+            + AdaptiveRouter.FUSION_FLOPS
+            + AdaptiveRouter.PRED_FLOPS
+        )
+        cost += n_aug * per_view
+        cost += k_steps * AdaptiveRouter.TTT_STEP_FLOPS
+        return cost
 
     def compute_flops(
         self,

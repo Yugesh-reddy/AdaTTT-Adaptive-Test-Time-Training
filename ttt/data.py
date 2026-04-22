@@ -846,3 +846,95 @@ def download_memotion2(data_dir: str) -> None:
     print("Annotation JSON format (list of dicts):")
     print('  [{"image": "img_001.jpg", "text": "OCR text", "sentiment": "positive"}, ...]')
     print("=" * 60)
+
+
+# ---------------------------------------------------------------------------
+# Dataset routing
+# ---------------------------------------------------------------------------
+
+# name -> (class, builder). Adding a dataset means adding a row here, not a new
+# `if` in each of the four runners.
+DATASET_REGISTRY = {
+    "vqa_v2": VQADataset,
+    "vizwiz": VizWizDataset,
+    "memotion2": Memotion2Dataset,
+}
+
+
+def build_dataset(
+    config: Dict[str, Any],
+    name: str,
+    split: str,
+    cls_only: bool = False,
+    answer_vocab: Optional[Dict[str, int]] = None,
+    tokenizer: Any = None,
+):
+    """Resolve a dataset name to its dataset object.
+
+    Every runner routes through here so that an unrecognised --dataset fails
+    loudly instead of silently falling through to VQA-v2 paths, which is what
+    v1 did with `--dataset vizwiz` in all four entry points.
+
+    Args:
+        config: Config dict.
+        name: "vqa_v2", "vizwiz" or "memotion2".
+        split: "train" or "val".
+        cls_only: Return the dataset class without touching the filesystem.
+            Used by tests to assert routing without needing the data present.
+        answer_vocab: Pre-loaded vocabulary. Loaded from data_dir if omitted.
+        tokenizer: Pre-loaded tokenizer, passed straight through.
+
+    Returns:
+        The dataset class if cls_only, else an instantiated Dataset.
+
+    Raises:
+        ValueError: If `name` is not a known dataset.
+    """
+    if name not in DATASET_REGISTRY:
+        valid = ", ".join(sorted(DATASET_REGISTRY))
+        raise ValueError(f"Unknown dataset '{name}'. Valid datasets: {valid}")
+
+    cls = DATASET_REGISTRY[name]
+    if cls_only:
+        return cls
+
+    data_dir = config.get("data_dir", "data/")
+    common = {
+        "tokenizer": tokenizer,
+        "max_question_length": config.get("max_question_length", 20),
+        "image_size": config.get("image_size", 224),
+        "strict_images": config.get("strict_images", True),
+    }
+
+    if name == "memotion2":
+        memo_dir = config.get("memotion2_data_dir", os.path.join(data_dir, "memotion2"))
+        return cls(
+            annotations_path=os.path.join(memo_dir, f"{split}.json"),
+            image_dir=os.path.join(memo_dir, "images"),
+            **common,
+        )
+
+    if answer_vocab is None:
+        answer_vocab = load_answer_vocab(os.path.join(data_dir, "answer_vocab.json"))
+
+    if name == "vizwiz":
+        vizwiz_dir = config.get("vizwiz_data_dir", os.path.join(data_dir, "vizwiz"))
+        return cls(
+            annotations_path=os.path.join(vizwiz_dir, f"{split}.json"),
+            image_dir=os.path.join(vizwiz_dir, split),
+            answer_vocab=answer_vocab,
+            **common,
+        )
+
+    return cls(
+        questions_path=os.path.join(
+            data_dir, f"v2_OpenEnded_mscoco_{split}2014_questions.json"
+        ),
+        annotations_path=os.path.join(
+            data_dir, f"v2_mscoco_{split}2014_annotations.json"
+        ),
+        image_dir=os.path.join(data_dir, f"{split}2014"),
+        answer_vocab=answer_vocab,
+        split=split,
+        **common,
+    )

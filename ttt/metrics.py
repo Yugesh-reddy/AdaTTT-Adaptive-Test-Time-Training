@@ -8,7 +8,7 @@ Includes:
 - Gate routing statistics aggregation
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
 
@@ -293,3 +293,42 @@ def mcnemar_test(
         "p_value": float(p_value),
         "significant_at_005": p_value < 0.05,
     }
+
+
+def prediction_record(
+    sample_id: str,
+    prediction: int,
+    answer_idx: int,
+    question_type: str,
+    answer_scores: Optional[Sequence[float]] = None,
+    **extra: Any,
+) -> Dict[str, Any]:
+    """Build one prediction record for a results file.
+
+    `answer_scores` is what makes vqa_accuracy_soft applicable after the fact.
+    Without it a results file can only be scored by exact match against the
+    single mode answer, which is what left every v1 number 4.74 points below
+    the model's actual official accuracy. Runners should always pass it through
+    when the dataset provides it.
+
+    Args:
+        sample_id: Question id as a string.
+        prediction: Predicted answer index.
+        answer_idx: Ground-truth mode answer index.
+        question_type: VQA answer_type ("yes/no", "number", "other").
+        answer_scores: Per-answer soft scores, min(#humans/3, 1).
+        **extra: Additional per-record fields (ttt_loss, confidence, skipped).
+
+    Returns:
+        The record dict.
+    """
+    record: Dict[str, Any] = {
+        "sample_id": sample_id,
+        "prediction": int(prediction),
+        "ground_truth": int(answer_idx),
+        "question_type": question_type,
+    }
+    if answer_scores is not None:
+        record["answer_scores"] = [float(s) for s in answer_scores]
+    record.update(extra)
+    return record
