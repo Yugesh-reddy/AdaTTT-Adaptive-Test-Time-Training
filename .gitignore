@@ -1,5 +1,9 @@
 # Large data & model files
-data/
+# data/* (not data/) so the frozen evaluation subsets can be un-ignored below —
+# git cannot re-include a file whose parent directory is excluded.
+data/*
+!data/eval_subset_8k.json
+!data/gate_train_subset_8k.json
 checkpoints/
 results/
 logs/
