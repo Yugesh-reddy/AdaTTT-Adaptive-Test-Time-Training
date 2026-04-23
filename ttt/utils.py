@@ -7,6 +7,7 @@ Provides config loading, JSON I/O, model checkpointing, and logging setup.
 import json
 import logging
 import os
+import re
 import random
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
@@ -31,8 +32,31 @@ def set_seed(seed: int = 42) -> None:
         torch.backends.cudnn.benchmark = False
 
 
+class _ConfigLoader(yaml.SafeLoader):
+    """SafeLoader that also reads YAML 1.2 floats such as ``1e-4``.
+
+    PyYAML implements YAML 1.1, where a float needs a decimal point, so
+    ``train_lr: 1e-4`` loads as the string "1e-4". That string reached
+    torch.optim.AdamW as the learning rate and killed both Phase 1 runs at
+    optimizer construction. A subclass, so the global SafeLoader is untouched.
+    """
+
+
+_ConfigLoader.add_implicit_resolver(
+    "tag:yaml.org,2002:float",
+    re.compile(r"""^[-+]?(?:[0-9][0-9_]*\.[0-9_]*(?:[eE][-+]?[0-9]+)?
+                   |\.[0-9_]+(?:[eE][-+]?[0-9]+)?
+                   |[0-9][0-9_]*[eE][-+]?[0-9]+
+                   |\.(?:inf|Inf|INF)
+                   |\.(?:nan|NaN|NAN))$""", re.X),
+    list("-+0123456789."),
+)
+
+
 def load_config(path: str = "config/config.yaml") -> Dict[str, Any]:
     """Load YAML configuration file.
+
+    Numbers written as ``1e-4`` load as floats (YAML 1.2), not strings.
 
     Args:
         path: Path to the YAML config file.
@@ -41,7 +65,7 @@ def load_config(path: str = "config/config.yaml") -> Dict[str, Any]:
         Dictionary of configuration values.
     """
     with open(path, "r") as f:
-        config = yaml.safe_load(f)
+        config = yaml.load(f, Loader=_ConfigLoader)
     return config
 
 
@@ -99,7 +123,12 @@ def save_checkpoint(
         checkpoint["optimizer"] = optimizer.state_dict()
     if extra is not None:
         checkpoint.update(extra)
-    torch.save(checkpoint, path)
+    # Write-then-rename: os.replace is atomic on POSIX, so a file under its
+    # final name is always complete. A preemption mid-write leaves only a
+    # stray .tmp, never a truncated epoch_N.pt that --resume would crash on.
+    tmp_path = f"{path}.tmp"
+    torch.save(checkpoint, tmp_path)
+    os.replace(tmp_path, path)
 
 
 def load_checkpoint(

@@ -192,6 +192,32 @@ class AdaptiveRouter:
 
         return all_logits, routing_info
 
+    # Per-backend encoder costs. CLIP's text tower is 12 layers at width 512
+    # over <=77 tokens, so it costs roughly 1 GFLOP at 20-token questions
+    # against BERT-base's ~22.5. That halves the base forward and therefore
+    # RAISES the adapted:base ratio, because augmentation cost is unchanged.
+    # These are estimates — re-derive with scripts/05_measure_flops.py before
+    # reporting any number.
+    ENCODER_COSTS = {
+        "vit_bert": (17.6e9, 22.5e9),
+        "clip": (17.6e9, 1.0e9),
+    }
+
+    @classmethod
+    def configure_for_backend(cls, backend: str) -> None:
+        """Repoint the FLOPs constants at an encoder backend.
+
+        Raises:
+            ValueError: If `backend` is unknown.
+        """
+        if backend not in cls.ENCODER_COSTS:
+            valid = ", ".join(sorted(cls.ENCODER_COSTS))
+            raise ValueError(f"Unknown encoder backend '{backend}'. Valid: {valid}")
+
+        cls.IMAGE_ENCODE_FLOPS, cls.TEXT_ENCODE_FLOPS = cls.ENCODER_COSTS[backend]
+        cls.ENCODE_FLOPS = cls.IMAGE_ENCODE_FLOPS + cls.TEXT_ENCODE_FLOPS
+        cls.SKIP_FLOPS = cls.ENCODE_FLOPS + cls.FUSION_FLOPS + cls.PRED_FLOPS
+
     @staticmethod
     def sample_flops(
         adapted: bool,
