@@ -1,3 +1,21 @@
+# ---------------------------------------------------------------------------
+# Phase 1 — backbone swap. ONE variable changes against the v1 reference below:
+# the encoders. Fusion depth, head width, batch size and LR are held at the
+# values that actually produced the archived 54.30% so the ceiling test is
+# attributable to CLIP and nothing else.
+#
+# v1 reference (produced results/ttt_predictions/*, checkpoint since lost):
+#   encoders ViT-B/16 + BERT-base | fusion_layers 2 | prediction_hidden 1024
+#   no query pooling | 15 epochs | batch 64 | lr 1e-4 | 33,140,542 trainable
+#   -> 54.30% official VQA soft, val flat from epoch 5
+#
+# num_query_tokens is 1, not v1's absent pooling and not 32: at 32 the
+# pool_proj alone is 18.9M parameters (Linear(24576, 768)), the single largest
+# overfitting surface in the model and one the v1 run never had. At 1 it is
+# 590K. Raise it only with evidence that pooling capacity is the limit.
+# ---------------------------------------------------------------------------
+encoder_backend: clip
+text_dim: 512
 checkpoint_dir: checkpoints/
 consistency_augmentations:
 - random_crop
@@ -11,7 +29,11 @@ figures_dir: figures/
 fusion_dim: 768
 fusion_dropout: 0.15
 fusion_heads: 12
-fusion_layers: 6
+fusion_layers: 2
+# true drops the last fusion layer's text update, which nothing reads: 7.1M params
+# that never train. Output is unchanged, but a checkpoint only loads under the
+# value it was saved with, and every checkpoint to date is false.
+fusion_skip_last_text_update: false
 gate_batch_size: 128
 gate_epochs: 5
 gate_hidden: 256
@@ -34,15 +56,15 @@ mixup_alpha_range:
 - 0.7
 - 1.0
 num_answers: 3129
-num_query_tokens: 32
-prediction_hidden: 1536
+num_query_tokens: 1
+prediction_hidden: 1024
 results_dir: results/
 seed: 42
 strict_images: true
-text_encoder: bert-base-uncased
-train_batch_size: 32
-train_epochs: 25
-train_lr: 5e-5
+text_encoder: openai/clip-vit-base-patch16
+train_batch_size: 64
+train_epochs: 8   # ep5->ep8 is what the ceiling test reads
+train_lr: 1.0e-4   # dotted on purpose: PyYAML (YAML 1.1) reads a dotless 1e-4 as a string
 train_loss: soft_bce
 train_optimizer: adamw
 train_scheduler: cosine
@@ -66,4 +88,4 @@ ttt_objectives:
 - rotation
 - contrastive
 val_split: val
-vision_encoder: google/vit-base-patch16-224
+vision_encoder: openai/clip-vit-base-patch16

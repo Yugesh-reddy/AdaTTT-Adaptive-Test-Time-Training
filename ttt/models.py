@@ -89,17 +89,33 @@ class FusionLayer(nn.Module):
         2. CrossAttention(Q=text, K=visual, V=visual) + residual + LayerNorm
         3. FFN on visual + residual + LayerNorm
         4. FFN on text + residual + LayerNorm
+
+    With update_text=False, steps 2 and 4 are neither built nor run and the
+    text stream passes through unchanged. Only valid where nothing downstream
+    reads the returned text — see FusionModule's skip_last_text_update.
     """
 
-    def __init__(self, dim: int = 768, num_heads: int = 12, dropout: float = 0.1):
+    def __init__(
+        self,
+        dim: int = 768,
+        num_heads: int = 12,
+        dropout: float = 0.1,
+        update_text: bool = True,
+    ):
         super().__init__()
+        self.update_text = update_text
+
         # Visual attends to text
         self.cross_attn_v2t = CrossAttention(dim, num_heads, dropout)
         self.norm_v2t = nn.LayerNorm(dim)
 
-        # Text attends to visual
-        self.cross_attn_t2v = CrossAttention(dim, num_heads, dropout)
-        self.norm_t2v = nn.LayerNorm(dim)
+        # Registration order is load-bearing: AdamW state is saved by parameter
+        # position, so the text modules stay interleaved exactly as before or
+        # existing checkpoints resume with moments attached to the wrong tensors.
+        if update_text:
+            # Text attends to visual
+            self.cross_attn_t2v = CrossAttention(dim, num_heads, dropout)
+            self.norm_t2v = nn.LayerNorm(dim)
 
         # FFN for visual stream
         self.ffn_v = nn.Sequential(
@@ -111,15 +127,16 @@ class FusionLayer(nn.Module):
         )
         self.norm_ffn_v = nn.LayerNorm(dim)
 
-        # FFN for text stream
-        self.ffn_t = nn.Sequential(
-            nn.Linear(dim, dim * 4),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(dim * 4, dim),
-            nn.Dropout(dropout),
-        )
-        self.norm_ffn_t = nn.LayerNorm(dim)
+        if update_text:
+            # FFN for text stream
+            self.ffn_t = nn.Sequential(
+                nn.Linear(dim, dim * 4),
+                nn.GELU(),
+                nn.Dropout(dropout),
+                nn.Linear(dim * 4, dim),
+                nn.Dropout(dropout),
+            )
+            self.norm_ffn_t = nn.LayerNorm(dim)
 
     def forward(
         self,
@@ -135,10 +152,12 @@ class FusionLayer(nn.Module):
 
         Returns:
             updated_visual: (B, Lv, D)
-            updated_text:   (B, Lt, D)
+            updated_text:   (B, Lt, D) — the input text if update_text=False
         """
         # Visual attends to text
         visual = self.norm_v2t(visual + self.cross_attn_v2t(visual, text, text, text_mask))
+        if not self.update_text:
+            return self.norm_ffn_v(visual + self.ffn_v(visual)), text
         # Text attends to visual
         text = self.norm_t2v(text + self.cross_attn_t2v(text, visual, visual))
         # FFNs
@@ -172,10 +191,34 @@ class FusionModule(nn.Module):
         num_layers: int = 6,
         dropout: float = 0.15,
         num_query_tokens: int = 32,
+        text_dim: Optional[int] = None,
+        skip_last_text_update: bool = False,
     ):
         super().__init__()
+
+        # CLIP's towers disagree on width (vision 768, text 512), so the text
+        # stream is projected up before fusion. Trainable, and deliberately NOT
+        # baked into the precomputed feature cache — caches store raw encoder
+        # output so the projector can keep learning.
+        self.text_dim = text_dim if text_dim is not None else dim
+        self.text_proj = (
+            nn.Linear(self.text_dim, dim) if self.text_dim != dim else None
+        )
+
+        # Pooling and return_sequence both read only the visual stream, so the
+        # last layer's text update never reaches an output and its parameters
+        # (7.1M at dim 768) never receive a gradient. skip_last_text_update
+        # drops them without changing what the module computes. Off by default:
+        # it changes the state-dict keys and the optimizer's parameter list, so
+        # existing checkpoints would neither load nor resume.
         self.layers = nn.ModuleList(
-            [FusionLayer(dim, num_heads, dropout) for _ in range(num_layers)]
+            [
+                FusionLayer(
+                    dim, num_heads, dropout,
+                    update_text=not (skip_last_text_update and i == num_layers - 1),
+                )
+                for i in range(num_layers)
+            ]
         )
 
         # Learned query tokens for attention-weighted pooling.
@@ -210,6 +253,8 @@ class FusionModule(nn.Module):
             If return_sequence=True:  (B, 197, 768) — full visual sequence
         """
         v, t = visual_tokens, text_tokens
+        if self.text_proj is not None:
+            t = self.text_proj(t)
         for layer in self.layers:
             v, t = layer(v, t, text_mask)
 
@@ -410,6 +455,49 @@ def load_frozen_bert(model_name: str = "bert-base-uncased") -> nn.Module:
     return bert
 
 
+CLIP_DEFAULT = "openai/clip-vit-base-patch16"
+
+# CLIP ViT-B/16: vision width 768 (197 tokens at 224px), text width 512.
+# The asymmetry is why FusionModule needs a text projector — see text_dim.
+CLIP_VISUAL_DIM = 768
+CLIP_TEXT_DIM = 512
+
+
+def _freeze(module: nn.Module) -> nn.Module:
+    for param in module.parameters():
+        param.requires_grad = False
+    module.eval()
+    return module
+
+
+def load_frozen_clip_vision(model_name: str = CLIP_DEFAULT) -> nn.Module:
+    """Load CLIP's vision tower and freeze ALL parameters.
+
+    Returns the CLIPVisionModel, whose forward takes `pixel_values` and returns
+    `.last_hidden_state` of shape (B, 197, 768) — the same call signature and
+    shape as ViTModel, so `encode()` needs no branch.
+
+    NOTE: CLIP expects its own image normalization, not ImageNet's. Build the
+    transform with `get_image_transform(size, backend="clip")`.
+    """
+    from transformers import CLIPVisionModel
+
+    return _freeze(CLIPVisionModel.from_pretrained(model_name))
+
+
+def load_frozen_clip_text(model_name: str = CLIP_DEFAULT) -> nn.Module:
+    """Load CLIP's text tower and freeze ALL parameters.
+
+    Forward takes `input_ids` + `attention_mask` and returns `.last_hidden_state`
+    of shape (B, L, 512) — matching BertModel's signature but NOT its width.
+
+    NOTE: requires CLIP's BPE tokenizer, not BERT WordPiece.
+    """
+    from transformers import CLIPTextModel
+
+    return _freeze(CLIPTextModel.from_pretrained(model_name))
+
+
 # ---------------------------------------------------------------------------
 # Auxiliary projection heads (used only during TTT)
 # ---------------------------------------------------------------------------
@@ -476,6 +564,8 @@ class FullVQAModel(nn.Module):
         self.fusion = FusionModule(
             dim, num_heads, num_layers, dropout,
             num_query_tokens=config.get("num_query_tokens", 32),
+            text_dim=config.get("text_dim", dim),
+            skip_last_text_update=config.get("fusion_skip_last_text_update", False),
         )
         self.gate = ConfidenceGate(dim, gate_hidden, dropout)
         self.entropy_gate = EntropyGate(num_answers)
@@ -493,8 +583,19 @@ class FullVQAModel(nn.Module):
 
         Call this separately so tests can skip the expensive download.
         """
-        self.vit = load_frozen_vit(config.get("vision_encoder", "google/vit-base-patch16-224"))
-        self.bert = load_frozen_bert(config.get("text_encoder", "bert-base-uncased"))
+        backend = config.get("encoder_backend", "vit_bert")
+        if backend == "clip":
+            self.vit = load_frozen_clip_vision(config.get("vision_encoder", CLIP_DEFAULT))
+            self.bert = load_frozen_clip_text(config.get("text_encoder", CLIP_DEFAULT))
+        elif backend == "vit_bert":
+            self.vit = load_frozen_vit(
+                config.get("vision_encoder", "google/vit-base-patch16-224")
+            )
+            self.bert = load_frozen_bert(config.get("text_encoder", "bert-base-uncased"))
+        else:
+            raise ValueError(
+                f"Unknown encoder_backend '{backend}'. Valid backends: clip, vit_bert"
+            )
 
     def train(self, mode: bool = True):
         """Override train() to keep frozen encoders and auxiliary heads in eval mode.
