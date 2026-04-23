@@ -25,6 +25,7 @@ import math
 import os
 import sys
 import time
+import warnings
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -32,8 +33,10 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
+from ttt.losses import vqa_loss
 from ttt.models import FullVQAModel
 from ttt.data import (
+    build_dataset, build_tokenizer,
     VQADataset, Memotion2Dataset, vqa_collate_fn,
     load_answer_vocab, build_memotion2_label_map,
 )
@@ -48,11 +51,16 @@ from ttt.utils import (
 )
 
 
-def evaluate(model, val_loader, device, use_amp=False):
-    """Evaluate model on validation set."""
+def evaluate(model, val_loader, device, use_amp=False, return_soft=False):
+    """Evaluate model on validation set.
+
+    Returns (exact-match accuracy, predictions), plus the official VQA soft
+    accuracy as a third element when return_soft=True.
+    """
     model.eval()
     correct = 0
     total = 0
+    soft_total = 0.0
     all_predictions = []
 
     with torch.no_grad():
@@ -69,6 +77,17 @@ def evaluate(model, val_loader, device, use_amp=False):
             correct += (preds == answers).sum().item()
             total += answers.size(0)
 
+            # Official VQA score of each prediction — min(#humans/3, 1) for the
+            # predicted answer — kept as one scalar per sample. The full
+            # 3129-wide vector used to be stored per sample instead: ~21 GB of
+            # Python floats per epoch on full val, written twice as ~3.5 GB of
+            # JSON on every new best. The scalar is all the official metric
+            # needs to score this run's own predictions.
+            scores = None
+            if "answer_scores" in batch:
+                scores = batch["answer_scores"].gather(1, preds.cpu().unsqueeze(1)).squeeze(1)
+                soft_total += scores.sum().item()
+
             # Save predictions
             for i in range(answers.size(0)):
                 pred_entry = {
@@ -78,13 +97,14 @@ def evaluate(model, val_loader, device, use_amp=False):
                     "question_type": batch["question_types"][i],
                     "confidence": confidence[i].item(),
                 }
-                # Include soft scores for official VQA accuracy
-                if "answer_scores" in batch:
-                    pred_entry["answer_scores"] = batch["answer_scores"][i].tolist()
+                if scores is not None:
+                    pred_entry["soft_score"] = scores[i].item()
                 all_predictions.append(pred_entry)
 
     accuracy = correct / total if total > 0 else 0.0
     model.train()
+    if return_soft:
+        return accuracy, all_predictions, (soft_total / total if total > 0 else 0.0)
     return accuracy, all_predictions
 
 
@@ -95,6 +115,7 @@ def main():
     parser.add_argument("--dataset", type=str, default=None,
                         help="Dataset: vqa_v2, vizwiz, or memotion2 (overrides config)")
     parser.add_argument("--resume", type=str, default=None, help="Resume from checkpoint")
+    parser.add_argument("--num-workers", type=int, default=4, help="DataLoader worker processes")
     parser.add_argument("--grad-accum-steps", type=int, default=1,
                         help="Gradient accumulation steps (effective batch = batch_size * accum)")
     args = parser.parse_args()
@@ -141,60 +162,33 @@ def main():
             model.vit.gradient_checkpointing_enable()
         logger.info("Gradient checkpointing enabled")
 
-    # Create datasets
-    if is_memotion2:
-        memo_dir = config.get("memotion2_data_dir", os.path.join(data_dir, "memotion2"))
-        train_dataset = Memotion2Dataset(
-            annotations_path=os.path.join(memo_dir, "train.json"),
-            image_dir=os.path.join(memo_dir, "images"),
-            max_question_length=config.get("max_question_length", 20),
-            image_size=config.get("image_size", 224),
-            strict_images=strict_images,
-        )
-        val_dataset = Memotion2Dataset(
-            annotations_path=os.path.join(memo_dir, "val.json"),
-            image_dir=os.path.join(memo_dir, "images"),
-            max_question_length=config.get("max_question_length", 20),
-            image_size=config.get("image_size", 224),
-            strict_images=strict_images,
-        )
-    else:
-        # Load answer vocabulary for VQA
-        vocab_path = os.path.join(data_dir, "answer_vocab.json")
-        answer_vocab = load_answer_vocab(vocab_path)
+    # Create datasets through the shared router, which picks the tokenizer and
+    # the image normalization from encoder_backend. Building VQADataset inline
+    # here fell back to BERT WordPiece ids and ImageNet statistics — a CLIP run
+    # would have trained on both without a single error.
+    tokenizer = build_tokenizer(config)
+    answer_vocab = None
+    if not is_memotion2:
+        answer_vocab = load_answer_vocab(os.path.join(data_dir, "answer_vocab.json"))
         logger.info(f"Answer vocab size: {len(answer_vocab)}")
-
-        train_dataset = VQADataset(
-            questions_path=os.path.join(data_dir, "v2_OpenEnded_mscoco_train2014_questions.json"),
-            annotations_path=os.path.join(data_dir, "v2_mscoco_train2014_annotations.json"),
-            image_dir=os.path.join(data_dir, "train2014"),
-            answer_vocab=answer_vocab,
-            max_question_length=config.get("max_question_length", 20),
-            image_size=config.get("image_size", 224),
-            split="train",
-            strict_images=strict_images,
-        )
-        val_dataset = VQADataset(
-            questions_path=os.path.join(data_dir, "v2_OpenEnded_mscoco_val2014_questions.json"),
-            annotations_path=os.path.join(data_dir, "v2_mscoco_val2014_annotations.json"),
-            image_dir=os.path.join(data_dir, "val2014"),
-            answer_vocab=answer_vocab,
-            max_question_length=config.get("max_question_length", 20),
-            image_size=config.get("image_size", 224),
-            split="val",
-            strict_images=strict_images,
-        )
+    train_dataset = build_dataset(config, dataset_name, split="train",
+                                  answer_vocab=answer_vocab, tokenizer=tokenizer)
+    val_dataset = build_dataset(config, dataset_name, split="val",
+                                answer_vocab=answer_vocab, tokenizer=tokenizer)
+    norm_mean = [round(float(m), 4) for m in val_dataset.transform.transforms[-1].mean]
+    logger.info(f"Preprocessing: {type(tokenizer).__name__} | image mean {norm_mean} "
+                f"| backend {config.get('encoder_backend', 'vit_bert')}")
 
     logger.info(f"Train samples: {len(train_dataset)}")
     logger.info(f"Val samples: {len(val_dataset)}")
 
     train_loader = DataLoader(
         train_dataset, batch_size=batch_size, shuffle=True,
-        num_workers=4, pin_memory=True, collate_fn=vqa_collate_fn,
+        num_workers=args.num_workers, pin_memory=True, collate_fn=vqa_collate_fn,
     )
     val_loader = DataLoader(
         val_dataset, batch_size=batch_size, shuffle=False,
-        num_workers=4, pin_memory=True, collate_fn=vqa_collate_fn,
+        num_workers=args.num_workers, pin_memory=True, collate_fn=vqa_collate_fn,
     )
 
     grad_accum_steps = max(1, args.grad_accum_steps)
@@ -216,19 +210,38 @@ def main():
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
 
-    # Resume from checkpoint
+    # Resume from checkpoint. Restores the full training state, not only the
+    # weights: rebuilding LambdaLR from step 0 would re-run warmup and restart
+    # the cosine mid-run, and resetting best_val_acc would let the first
+    # post-resume epoch overwrite best.pt with a worse model. Either corrupts
+    # the epoch-5-to-8 slope that scripts/06_ceiling_check.py reads.
     start_epoch = 0
+    best_val_acc = -1.0  # below any real accuracy, so epoch 1 always writes best.pt
+    scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
     if args.resume:
         from ttt.utils import load_checkpoint
         ckpt = load_checkpoint(model, args.resume, load_optimizer=True, optimizer=optimizer)
         start_epoch = ckpt.get("epoch", 0) + 1
-        logger.info(f"Resumed from epoch {start_epoch}")
+        if "scheduler" in ckpt:
+            scheduler.load_state_dict(ckpt["scheduler"])
+        else:
+            # Pre-fix checkpoints carry no scheduler state; fast-forward instead.
+            logger.warning("Checkpoint has no scheduler state; fast-forwarding the LR schedule")
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                for _ in range(start_epoch * steps_per_epoch):
+                    scheduler.step()
+        if "scaler" in ckpt:
+            scaler.load_state_dict(ckpt["scaler"])
+        best_val_acc = ckpt.get("best_val_acc", -1.0)
+        logger.info(
+            f"Resumed from epoch {start_epoch} | lr {scheduler.get_last_lr()[0]:.3e} "
+            f"| best val {best_val_acc*100:.2f}%"
+        )
 
     # Training loop
-    best_val_acc = 0.0
     checkpoint_dir = os.path.join(config.get("checkpoint_dir", "checkpoints/"), "base")
     os.makedirs(checkpoint_dir, exist_ok=True)
-    scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
     for epoch in range(start_epoch, epochs):
         model.train()
@@ -248,13 +261,11 @@ def main():
             with torch.amp.autocast("cuda", enabled=use_amp):
                 logits, confidence, z = model(images, input_ids, attention_mask)
 
-            # Loss: soft-label BCE (official VQA training loss) or hard cross-entropy
+            # Loss: soft-label BCE (official VQA training loss) or hard cross-entropy.
+            # vqa_loss sums the BCE over answers; see ttt/losses.py for why.
             use_soft = config.get("train_loss", "soft_bce") == "soft_bce" and "answer_scores" in batch
-            if use_soft:
-                answer_scores = batch["answer_scores"].to(device)
-                loss_vqa = F.binary_cross_entropy_with_logits(logits, answer_scores)
-            else:
-                loss_vqa = F.cross_entropy(logits, answers)
+            answer_scores = batch["answer_scores"].to(device) if use_soft else None
+            loss_vqa = vqa_loss(logits, answers, answer_scores)
 
             # Gate auxiliary loss (fp32 for BCE numerical stability)
             with torch.no_grad():
@@ -299,16 +310,33 @@ def main():
         )
 
         # Validate
-        val_acc, val_predictions = evaluate(model, val_loader, device, use_amp=use_amp)
+        val_acc, val_predictions, val_soft = evaluate(
+            model, val_loader, device, use_amp=use_amp, return_soft=True
+        )
         logger.info(f"Epoch {epoch+1} | Val accuracy: {val_acc*100:.2f}%")
+        # Separate line, deliberately not matching the "| Val accuracy:" pattern
+        # scripts/06_ceiling_check.py parses — that stays exact-match (49.56 scale).
+        logger.info(f"Epoch {epoch+1} | Official VQA soft: {val_soft*100:.2f}%")
+
+        # Every checkpoint carries the full training state so --resume can
+        # continue the run exactly instead of restarting its LR schedule.
+        is_best = val_acc > best_val_acc
+        if is_best:
+            best_val_acc = val_acc
+        train_state = {
+            "scheduler": scheduler.state_dict(),
+            "scaler": scaler.state_dict(),
+            "best_val_acc": best_val_acc,
+        }
 
         # Save checkpoint
-        save_checkpoint(model, optimizer, epoch, os.path.join(checkpoint_dir, f"epoch_{epoch}.pt"))
+        save_checkpoint(model, optimizer, epoch,
+                        os.path.join(checkpoint_dir, f"epoch_{epoch}.pt"), extra=train_state)
 
         # Save best
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
-            save_checkpoint(model, optimizer, epoch, os.path.join(checkpoint_dir, "best.pt"))
+        if is_best:
+            save_checkpoint(model, optimizer, epoch,
+                            os.path.join(checkpoint_dir, "best.pt"), extra=train_state)
             logger.info(f"  New best! Val accuracy: {val_acc*100:.2f}%")
 
             # Save val predictions for gate label generation

@@ -26,21 +26,63 @@ import numpy as np
 # Image transforms
 # ---------------------------------------------------------------------------
 
-def get_image_transform(image_size: int = 224):
-    """Get standard image preprocessing for ViT.
+# Per-backend image normalization. Feeding CLIP ImageNet statistics degrades
+# its features silently — no error, just worse numbers — so the backend has to
+# pick the constants rather than defaulting to one set.
+NORMALIZATION = {
+    "vit_bert": ([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+    "clip": (
+        [0.48145466, 0.4578275, 0.40821073],
+        [0.26862954, 0.26130258, 0.27577711],
+    ),
+}
 
-    Resize to image_size × image_size, normalize with ImageNet stats.
+
+def get_image_transform(image_size: int = 224, backend: str = "vit_bert"):
+    """Image preprocessing for the given encoder backend.
+
+    Args:
+        image_size: Resize target (square).
+        backend: "vit_bert" (ImageNet stats) or "clip" (CLIP stats).
+
+    Raises:
+        ValueError: If `backend` is unknown.
     """
     import torchvision.transforms as T
 
+    if backend not in NORMALIZATION:
+        valid = ", ".join(sorted(NORMALIZATION))
+        raise ValueError(f"Unknown encoder backend '{backend}'. Valid: {valid}")
+
+    mean, std = NORMALIZATION[backend]
     return T.Compose([
         T.Resize((image_size, image_size)),
         T.ToTensor(),
-        T.Normalize(
-            mean=[0.485, 0.456, 0.406],
-            std=[0.229, 0.224, 0.225],
-        ),
+        T.Normalize(mean=mean, std=std),
     ])
+
+
+def build_tokenizer(config: Dict[str, Any]):
+    """Tokenizer matching the configured encoder backend.
+
+    CLIP uses BPE with its own vocabulary; BERT WordPiece ids are meaningless
+    to it. Wrong tokenizer means silently garbled text, so this is driven by
+    encoder_backend rather than left to a default.
+    """
+    backend = config.get("encoder_backend", "vit_bert")
+    if backend == "clip":
+        from transformers import CLIPTokenizerFast
+
+        return CLIPTokenizerFast.from_pretrained(
+            config.get("text_encoder", "openai/clip-vit-base-patch16")
+        )
+    if backend == "vit_bert":
+        from transformers import BertTokenizer
+
+        return BertTokenizer.from_pretrained(
+            config.get("text_encoder", "bert-base-uncased")
+        )
+    raise ValueError(f"Unknown encoder backend '{backend}'. Valid: clip, vit_bert")
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +165,8 @@ class VQADataset(Dataset):
 
     Answer preprocessing:
         Map answer string to index in answer vocabulary
-        Answers not in vocab get mapped to <UNK> (index 0)
+        A mode answer not in vocab gets answer_idx <UNK> (index 0); out-of-vocab
+        votes are dropped from answer_scores rather than pooled into <UNK>
     """
 
     def __init__(
@@ -137,6 +180,7 @@ class VQADataset(Dataset):
         image_size: int = 224,
         split: str = "train",
         strict_images: bool = True,
+        image_transform: Any = None,
     ):
         """
         Args:
@@ -156,7 +200,7 @@ class VQADataset(Dataset):
         self.image_size = image_size
         self.split = split
         self.strict_images = strict_images
-        self.transform = get_image_transform(image_size)
+        self.transform = image_transform or get_image_transform(image_size)
 
         # Load tokenizer
         if tokenizer is None:
@@ -194,10 +238,15 @@ class VQADataset(Dataset):
             # Soft answer scores: min(count / 3, 1.0) per the official VQA metric.
             # This gives partial credit when multiple annotators agree and provides
             # a much richer training signal than hard one-hot labels.
+            # Out-of-vocabulary votes are dropped, never pooled into <UNK>. Pooled,
+            # <UNK> is a positive target on ~31% of val questions (1.0 on ~16%),
+            # the model learns to answer "<UNK>", and gathering this vector then
+            # credits that answer, which the official metric never does.
             answer_scores = torch.zeros(self.num_answers)
             for ans_text, count in answer_counts.items():
-                idx = self.answer_vocab.get(ans_text, 0)
-                answer_scores[idx] += count
+                idx = self.answer_vocab.get(ans_text)
+                if idx is not None:
+                    answer_scores[idx] += count
             answer_scores = torch.clamp(answer_scores / 3.0, max=1.0)
 
             # Question type
@@ -277,6 +326,7 @@ class VizWizDataset(Dataset):
         max_question_length: int = 20,
         image_size: int = 224,
         strict_images: bool = True,
+        image_transform: Any = None,
     ):
         """
         Args:
@@ -292,7 +342,7 @@ class VizWizDataset(Dataset):
         self.max_question_length = max_question_length
         self.image_size = image_size
         self.strict_images = strict_images
-        self.transform = get_image_transform(image_size)
+        self.transform = image_transform or get_image_transform(image_size)
 
         if tokenizer is None:
             from transformers import BertTokenizer
@@ -515,6 +565,7 @@ class Memotion2Dataset(Dataset):
         max_question_length: int = 20,
         image_size: int = 224,
         strict_images: bool = True,
+        image_transform: Any = None,
     ):
         """
         Args:
@@ -533,7 +584,7 @@ class Memotion2Dataset(Dataset):
         self.max_question_length = max_question_length
         self.image_size = image_size
         self.strict_images = strict_images
-        self.transform = get_image_transform(image_size)
+        self.transform = image_transform or get_image_transform(image_size)
 
         if tokenizer is None:
             from transformers import BertTokenizer
@@ -899,8 +950,15 @@ def build_dataset(
         return cls
 
     data_dir = config.get("data_dir", "data/")
+    backend = config.get("encoder_backend", "vit_bert")
     common = {
-        "tokenizer": tokenizer,
+        # Both are backend-dependent, so they are resolved here rather than
+        # left to each dataset's default — a CLIP run that fell back to BERT
+        # WordPiece and ImageNet normalization would produce no error at all.
+        "tokenizer": tokenizer if tokenizer is not None else build_tokenizer(config),
+        "image_transform": get_image_transform(
+            config.get("image_size", 224), backend=backend
+        ),
         "max_question_length": config.get("max_question_length", 20),
         "image_size": config.get("image_size", 224),
         "strict_images": config.get("strict_images", True),

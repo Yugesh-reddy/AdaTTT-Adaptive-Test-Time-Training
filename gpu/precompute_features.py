@@ -39,7 +39,7 @@ from tqdm import tqdm
 from ttt.models import FullVQAModel
 from ttt.data import (
     VQADataset, Memotion2Dataset, vqa_collate_fn,
-    load_answer_vocab,
+    load_answer_vocab, build_dataset,
 )
 from ttt.utils import (
     load_config,
@@ -93,28 +93,10 @@ def main():
     model = model.to(device)
     model.eval()
 
-    if is_memotion2:
-        memo_dir = config.get("memotion2_data_dir", os.path.join(data_dir, "memotion2"))
-        dataset = Memotion2Dataset(
-            annotations_path=os.path.join(memo_dir, f"{args.split}.json"),
-            image_dir=os.path.join(memo_dir, "images"),
-            max_question_length=config.get("max_question_length", 20),
-            image_size=config.get("image_size", 224),
-            strict_images=strict_images,
-        )
-    else:
-        answer_vocab = load_answer_vocab(os.path.join(data_dir, "answer_vocab.json"))
-        split_year = "train2014" if args.split == "train" else "val2014"
-        dataset = VQADataset(
-            questions_path=os.path.join(data_dir, f"v2_OpenEnded_mscoco_{split_year}_questions.json"),
-            annotations_path=os.path.join(data_dir, f"v2_mscoco_{split_year}_annotations.json"),
-            image_dir=os.path.join(data_dir, split_year),
-            answer_vocab=answer_vocab,
-            max_question_length=config.get("max_question_length", 20),
-            image_size=config.get("image_size", 224),
-            split="train" if args.split == "train" else "val",
-            strict_images=strict_images,
-        )
+    # Routed through build_dataset so the tokenizer and image normalization
+    # always match encoder_backend. A CLIP cache built with BERT WordPiece ids
+    # and ImageNet statistics would raise no error and be silently worthless.
+    dataset = build_dataset(config, dataset_name, split=args.split)
 
     if args.max_samples:
         dataset.samples = dataset.samples[:args.max_samples]
