@@ -145,8 +145,29 @@ def load_answer_vocab(path: str) -> Dict[str, int]:
 # VQA-v2 Dataset
 # ---------------------------------------------------------------------------
 
+def _entries(blob, key, path):
+    """Rows from either the official {key: [...]} wrapper or a flat list.
+
+    VQA-CP ships flat lists, where assuming the wrapper raised KeyError.
+    """
+    if isinstance(blob, dict):
+        if key not in blob:
+            raise ValueError(
+                f"{path}: JSON object without a '{key}' key; keys: {sorted(blob)[:6]}"
+            )
+        return blob[key]
+    if isinstance(blob, list):
+        return blob
+    raise ValueError(
+        f"{path}: expected a list or an object with '{key}', got {type(blob).__name__}"
+    )
+
+
 class VQADataset(Dataset):
-    """VQA-v2 or VizWiz dataset.
+    """VQA-v2, VQA-CP or VizWiz dataset.
+
+    Questions and annotations may be the official {"questions": [...]} /
+    {"annotations": [...]} objects or VQA-CP's flat lists.
 
     __getitem__ returns:
         image: torch.Tensor (3, 224, 224) — preprocessed for ViT
@@ -211,16 +232,16 @@ class VQADataset(Dataset):
 
         # Load questions
         with open(questions_path, "r") as f:
-            questions_data = json.load(f)
-        questions_map = {q["question_id"]: q for q in questions_data["questions"]}
+            questions = _entries(json.load(f), "questions", questions_path)
+        questions_map = {q["question_id"]: q for q in questions}
 
         # Load annotations
         with open(annotations_path, "r") as f:
-            annotations_data = json.load(f)
+            annotations = _entries(json.load(f), "annotations", annotations_path)
 
         # Build samples
         self.samples = []
-        for ann in annotations_data["annotations"]:
+        for ann in annotations:
             qid = ann["question_id"]
             question_info = questions_map.get(qid)
             if question_info is None:
@@ -252,10 +273,19 @@ class VQADataset(Dataset):
             # Question type
             question_type = ann.get("answer_type", "other")
 
-            # Image path
+            # Image path. VQA-CP mixes both COCO splits in one file and names the
+            # split per entry, so image_dir is the COCO parent there. VQA-v2 keeps
+            # one split per file, with image_dir pointing straight at its images.
             image_id = ann["image_id"]
-            image_filename = f"COCO_{split}2014_{image_id:012d}.jpg"
-            image_path = os.path.join(image_dir, image_filename)
+            coco_split = ann.get("coco_split") or question_info.get("coco_split")
+            if coco_split:
+                image_path = os.path.join(
+                    image_dir, coco_split, f"COCO_{coco_split}_{image_id:012d}.jpg"
+                )
+            else:
+                image_path = os.path.join(
+                    image_dir, f"COCO_{split}2014_{image_id:012d}.jpg"
+                )
 
             self.samples.append({
                 "image_path": image_path,
@@ -907,6 +937,7 @@ def download_memotion2(data_dir: str) -> None:
 # `if` in each of the four runners.
 DATASET_REGISTRY = {
     "vqa_v2": VQADataset,
+    "vqa_cp": VQADataset,
     "vizwiz": VizWizDataset,
     "memotion2": Memotion2Dataset,
 }
@@ -928,7 +959,7 @@ def build_dataset(
 
     Args:
         config: Config dict.
-        name: "vqa_v2", "vizwiz" or "memotion2".
+        name: "vqa_v2", "vqa_cp", "vizwiz" or "memotion2".
         split: "train" or "val".
         cls_only: Return the dataset class without touching the filesystem.
             Used by tests to assert routing without needing the data present.
@@ -981,6 +1012,19 @@ def build_dataset(
             annotations_path=os.path.join(vizwiz_dir, f"{split}.json"),
             image_dir=os.path.join(vizwiz_dir, split),
             answer_vocab=answer_vocab,
+            **common,
+        )
+
+    if name == "vqa_cp":
+        # Flat-list JSONs whose entries name their own COCO split, so the images
+        # come from data/{train2014,val2014} and image_dir is their parent.
+        cp_dir = config.get("vqa_cp_data_dir", os.path.join(data_dir, "vqa_cp"))
+        return cls(
+            questions_path=os.path.join(cp_dir, f"vqacp_v2_{split}_questions.json"),
+            annotations_path=os.path.join(cp_dir, f"vqacp_v2_{split}_annotations.json"),
+            image_dir=data_dir,
+            answer_vocab=answer_vocab,
+            split=split,
             **common,
         )
 
