@@ -17,7 +17,13 @@ from ttt.models import (
     load_frozen_bert,
 )
 from ttt.ttt_loop import TTTAdapter
+from ttt.tta import TTAAdapter
 from ttt.gate import AdaptiveRouter
+from ttt.shift_cache import (
+    MultiViewCachedFeaturesDataset,
+    N_VIEWS,
+    multiview_collate_fn,
+)
 from ttt.data import (
     VQADataset,
     VizWizDataset,
@@ -57,7 +63,7 @@ __all__ = [
     "PredictionHead", "MaskedPatchProjection", "RotationHead",
     "load_frozen_vit", "load_frozen_bert",
     # TTT
-    "TTTAdapter",
+    "TTTAdapter", "TTAAdapter",
     # Gate / Router
     "AdaptiveRouter",
     # Latency
@@ -66,6 +72,7 @@ __all__ = [
     "GracefulPredictor", "FallbackResult", "FallbackLevel",
     # Data
     "VQADataset", "VizWizDataset", "Memotion2Dataset", "CachedFeaturesDataset",
+    "MultiViewCachedFeaturesDataset", "multiview_collate_fn", "N_VIEWS",
     "build_memotion2_label_map", "cached_vqa_collate_fn",
     # Metrics
     "bootstrap_confidence_interval",
