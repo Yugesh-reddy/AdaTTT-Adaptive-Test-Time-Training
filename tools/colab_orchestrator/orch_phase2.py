@@ -203,15 +203,32 @@ def finalize(st, probe):
     return summary, still
 
 
+def _have_live_vm(st):
+    """Attach to the namespaced session / recorded endpoint. Never `colab new` over it."""
+    alive = orch.session_alive()
+    if alive is True:
+        token = orch.keep_token_fresh(st)
+        orch.log(f"  session {SESSION} is live (refresh={token})")
+        return True
+    ep = st.get("endpoint")
+    if not ep:
+        return False
+    rc, out = orch.helper(["adopt", SESSION, ep], 180)
+    orch.log(f"  adopt {ep} rc={rc} {out.strip()[:120]}")
+    return rc == 0
+
+
 def run_loop(st):
     have_vm = False
-    if st.get("endpoint") and st.get("alloc_ts"):
-        token = orch.keep_token_fresh(st)
-        have_vm = token in ("ok", "readopted")
-        if have_vm:
-            orch.log(f"attaching to existing VM {st['endpoint']} ({token})")
-        else:
-            orch.release_orphans(st)
+    if _have_live_vm(st):
+        have_vm = True
+        if not st.get("alloc_ts"):
+            st["alloc_ts"] = orch.now()
+            orch.save_state(st)
+        orch.log(f"attaching to existing VM {st.get('endpoint')}")
+    elif st.get("endpoint"):
+        orch.log(f"recorded endpoint {st['endpoint']} is gone; will allocate a replacement")
+        orch.release_orphans(st)
     fails = 0
     while True:
         if orch.vm_hours(st) >= orch.BUDGET_H:
@@ -219,6 +236,10 @@ def run_loop(st):
             return 5
 
         if not have_vm:
+            if orch.session_alive() is True:
+                orch.log("session already live; attaching instead of allocating")
+                have_vm = True
+                continue
             if st["allocations"] >= orch.MAX_ALLOC:
                 orch.sweep_failed_new(st, adopt=False)
                 orch.log("out of allocations")
