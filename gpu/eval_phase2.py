@@ -17,17 +17,17 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from typing import List
+import json
+from typing import List, Optional
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from ttt.gate import AdaptiveRouter
 from ttt.models import FullVQAModel
-from ttt.phase2_eval import evaluate_condition
+from ttt.phase2_eval import evaluate_condition, order_methods
 from ttt.phase2_report import (
     compact_outcomes,
     save_outcomes_npz,
@@ -38,20 +38,22 @@ from ttt.shift_cache import (
     CachePathError,
     MultiViewCachedFeaturesDataset,
     assert_cache_path_allowed,
-    multiview_collate_fn,
 )
 from ttt.tta import TTAAdapter
-from ttt.utils import load_checkpoint, load_config, set_seed, setup_logging
+from ttt.utils import get_device, load_checkpoint, load_config, set_seed, setup_logging
 
 
 METHODS = ("no_adapt", "tent", "eata", "memo", "memo_sar", "gated_memo_sar")
 
 
-def _load_all(ds: MultiViewCachedFeaturesDataset) -> dict:
-    loader = DataLoader(
-        ds, batch_size=len(ds), shuffle=False, collate_fn=multiview_collate_fn
-    )
-    return next(iter(loader))
+def _write_progress(path: Optional[str], payload: dict) -> None:
+    if not path:
+        return
+    tmp = path + ".tmp"
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(tmp, "w") as fh:
+        json.dump(payload, fh)
+    os.replace(tmp, path)
 
 
 def main(argv: List[str] | None = None) -> int:
@@ -67,6 +69,8 @@ def main(argv: List[str] | None = None) -> int:
     parser.add_argument("--source", type=str, default="corruption",
                         help="τ-tuning source tag; VQA-CP is rejected")
     parser.add_argument("--k", type=int, default=1)
+    parser.add_argument("--progress-file", type=str, default=None,
+                        help="Optional JSON heartbeat (VM probe); never a cache path")
     args = parser.parse_args(argv)
 
     try:
@@ -79,15 +83,23 @@ def main(argv: List[str] | None = None) -> int:
     logger = setup_logging("logs")
     backend = config.get("encoder_backend", "clip")
     AdaptiveRouter.configure_for_backend(backend)
+    device = get_device()
 
     model = FullVQAModel(config)
     # Read-only load of Phase 1 weights. Never writes checkpoints or retrains.
-    load_checkpoint(model, args.checkpoint)
+    try:
+        load_checkpoint(model, args.checkpoint)
+    except Exception:
+        ckpt = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+        model.fusion.load_state_dict(ckpt["fusion"])
+        model.gate.load_state_dict(ckpt["gate"])
+        model.prediction_head.load_state_dict(ckpt["prediction_head"])
+    model.to(device)
     model.eval()
 
+    # Stream the cache. Do not stack 8k rows as float32 (~24 GB).
     ds = MultiViewCachedFeaturesDataset(features_path)
-    samples = _load_all(ds)
-    logger.info("Loaded %d samples from %s", len(ds), features_path)
+    logger.info("Streaming %d samples from %s on %s", len(ds), features_path, device)
 
     weights = ScoreWeights()
     runs = []
@@ -96,22 +108,58 @@ def main(argv: List[str] | None = None) -> int:
     base_soft = None
     memo_soft = None
     gate_scores = None
+    tau = args.tau
+    methods = order_methods(args.methods)
 
-    for method in args.methods:
+    for method in methods:
+        if method == "gated_memo_sar" and tau is None:
+            if base_soft is None or memo_soft is None or gate_scores is None:
+                raise RuntimeError(
+                    "gated_memo_sar needs no_adapt and memo first to tune τ "
+                    "(or pass --tau). τ is never tuned on VQA-CP."
+                )
+            chosen = tune_tau(gate_scores, base_soft, memo_soft, source=args.source)
+            tau = float(chosen["tau"])
+            with open(os.path.join(args.output, "tau.json"), "w") as fh:
+                json.dump(chosen, fh, indent=2)
+            logger.info("Tuned τ=%s on %s (not VQA-CP)", chosen["tau"], args.source)
+
         adapter = None
         if method != "no_adapt":
             tta_method = "memo_sar" if method == "gated_memo_sar" else method
             adapter = TTAAdapter(
                 model, config, method=tta_method, k_steps=args.k, layernorm_only=True
             )
+
+        def _tick(done: int, total: int, method=method) -> None:
+            _write_progress(args.progress_file, {
+                "stage": "eval",
+                "step": f"{method} {done}/{total}",
+                "method": method,
+                "n": done,
+                "n_total": total,
+                "done": False,
+                "crash": False,
+            })
+
+        _write_progress(args.progress_file, {
+            "stage": "eval",
+            "step": f"{method} 0/{len(ds)}",
+            "method": method,
+            "n": 0,
+            "n_total": len(ds),
+            "done": False,
+            "crash": False,
+        })
         out = evaluate_condition(
             model,
-            samples,
+            ds,
             method=method,
             adapter=adapter,
-            tau=args.tau if method == "gated_memo_sar" else None,
+            tau=tau if method == "gated_memo_sar" else None,
             weights=weights,
             k_steps=args.k,
+            on_progress=_tick,
         )
         if method == "no_adapt":
             base_soft = out["soft_score"].copy()
@@ -148,13 +196,6 @@ def main(argv: List[str] | None = None) -> int:
             "%s soft=%.4f exact=%.4f adapt=%.3f flops=%.1fG",
             method, soft, exact, adapt_rate, out["flops_g"].mean(),
         )
-
-    if args.tau is None and base_soft is not None and memo_soft is not None and gate_scores is not None:
-        chosen = tune_tau(gate_scores, base_soft, memo_soft, source=args.source)
-        with open(os.path.join(args.output, "tau.json"), "w") as fh:
-            import json
-            json.dump(chosen, fh, indent=2)
-        logger.info("Tuned τ=%s on %s (not VQA-CP)", chosen["tau"], args.source)
 
     write_phase2_report(runs, args.output, backend=backend)
     logger.info("Wrote report under %s", args.output)

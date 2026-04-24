@@ -2,13 +2,15 @@
 Phase 2 eval loop on a multi-view cache: methods, gating, sample_flops, no UNK credit.
 """
 
+import os
+
 import numpy as np
 import pytest
 import torch
 
 from ttt.gate import AdaptiveRouter
 from ttt.models import FullVQAModel
-from ttt.phase2_eval import evaluate_condition
+from ttt.phase2_eval import evaluate_condition, merge_condition_outputs, order_methods
 from ttt.score_gate import ScoreWeights
 from ttt.tta import TTAAdapter
 
@@ -113,3 +115,61 @@ def test_unk_index_gets_zero_soft_credit():
     unk = out["prediction"] == 0
     if unk.any():
         assert np.allclose(out["soft_score"][unk], 0.0)
+
+
+class _TinyCache:
+    def __init__(self, blob):
+        self._blob = blob
+
+    def __len__(self):
+        return self._blob["visual_tokens"].shape[0]
+
+    def __getitem__(self, idx):
+        return {
+            "visual_tokens": self._blob["visual_tokens"][idx],
+            "text_tokens": self._blob["text_tokens"][idx],
+            "attention_mask": self._blob["attention_mask"][idx],
+            "answer_idx": int(self._blob["answer_idx"][idx]),
+            "answer_scores": self._blob["answer_scores"][idx],
+        }
+
+
+def test_evaluate_condition_streams_dataset_on_model_device():
+    model = FullVQAModel(_config())
+    model.eval()
+    AdaptiveRouter.configure_for_backend("clip")
+    blob = _samples(n=3)
+    ticks = []
+    out = evaluate_condition(
+        model, _TinyCache(blob), method="no_adapt", on_progress=lambda d, t: ticks.append((d, t))
+    )
+    assert out["prediction"].shape == (3,)
+    assert out["adapted"].sum() == 0
+    assert ticks[-1] == (3, 3)
+    device = next(model.parameters()).device
+    assert device.type == "cpu"
+
+
+def test_order_methods_puts_gate_last_after_base_and_memo():
+    assert order_methods(["gated_memo_sar", "tent", "no_adapt", "memo"]) == [
+        "no_adapt", "memo", "tent", "gated_memo_sar"
+    ]
+
+
+def test_merge_condition_outputs_recomputes_scalars():
+    model = FullVQAModel(_config())
+    model.eval()
+    AdaptiveRouter.configure_for_backend("clip")
+    a = evaluate_condition(model, _samples(n=2), method="no_adapt")
+    b = evaluate_condition(model, _samples(n=2), method="no_adapt")
+    merged = merge_condition_outputs([a, b])
+    assert merged["prediction"].shape == (4,)
+    assert "maxprob_auroc" in merged
+
+
+def test_eval_phase2_script_does_not_stack_full_cache():
+    path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "gpu", "eval_phase2.py")
+    src = open(path).read()
+    assert "_load_all" not in src
+    assert "batch_size=len(ds)" not in src
+    assert "order_methods" in src

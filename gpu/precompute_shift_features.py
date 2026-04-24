@@ -162,6 +162,8 @@ def main(argv: List[str] | None = None) -> int:
                         help="Rejected: CLIP-LN invalidates this cache")
     parser.add_argument("--dtype", type=str, default="float16",
                         choices=["float16", "float32"])
+    parser.add_argument("--progress-file", type=str, default=None,
+                        help="Optional JSON heartbeat (VM probe); never a cache path")
     args = parser.parse_args(argv)
 
     reject_clip_ln_ablation(args.clip_ln)
@@ -202,8 +204,26 @@ def main(argv: List[str] | None = None) -> int:
     sample_ids = []
     question_types = []
 
+    def _tick(done: int, total: int) -> None:
+        if not args.progress_file:
+            return
+        tmp = args.progress_file + ".tmp"
+        os.makedirs(os.path.dirname(args.progress_file) or ".", exist_ok=True)
+        with open(tmp, "w") as fh:
+            json.dump({
+                "stage": "precompute",
+                "step": f"precompute {done}/{total}",
+                "n": done,
+                "n_total": total,
+                "done": False,
+                "crash": False,
+            }, fh)
+        os.replace(tmp, args.progress_file)
+
     id_to_index = {str(s["sample_id"]): i for i, s in enumerate(dataset.samples)}
-    for sample_meta in kept:
+    total = len(kept)
+    _tick(0, total)
+    for i_keep, sample_meta in enumerate(kept):
         j = id_to_index[str(sample_meta["sample_id"])]
         live = dataset[j]
         pil = _pil_from_sample(dataset.samples[j])
@@ -226,6 +246,9 @@ def main(argv: List[str] | None = None) -> int:
             score_rows.append(live["answer_scores"].cpu())
         sample_ids.append(str(live["sample_id"]))
         question_types.append(live["question_type"])
+        if (i_keep + 1) % 50 == 0 or i_keep + 1 == total:
+            _tick(i_keep + 1, total)
+            logger.info("precompute %d/%d", i_keep + 1, total)
 
     blob: Dict[str, Any] = {
         "sample_ids": sample_ids,
