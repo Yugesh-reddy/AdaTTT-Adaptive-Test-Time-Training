@@ -222,3 +222,4 @@ class LatencyProfiler:
         summary["ttt_trigger_rate"] = ttt_triggered / n_samples if n_samples > 0 else 0.0
 
         return summary
+# Improve latency measurement precision
