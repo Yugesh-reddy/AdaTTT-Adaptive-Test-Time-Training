@@ -572,3 +572,4 @@ class FullVQAModel(nn.Module):
             for name, param in module.named_parameters():
                 params.append((f"{module_name}.{name}", param))
         return params
+# Optimize model forward pass memory usage
