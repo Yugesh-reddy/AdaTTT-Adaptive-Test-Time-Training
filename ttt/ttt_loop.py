@@ -394,3 +394,4 @@ class TTTAdapter:
         alpha_lo, alpha_hi = self.mixup_alpha_range
         alpha = random.uniform(alpha_lo, alpha_hi)
         return alpha * z_current + (1 - alpha) * z_anchor.detach()
+# Fix edge case in TTT loop gradient accumulation
