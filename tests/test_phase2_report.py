@@ -145,3 +145,36 @@ def test_write_phase2_report_pareto_and_percentiles(tmp_path):
     assert "flops_p50" in gated and "flops_p95" in gated
     assert summary["flops_ladder"]["used_for_reporting"] == "sample_flops"
     assert out["n_runs"] == 4
+
+
+def test_write_phase2_report_persists_oracle(tmp_path):
+    AdaptiveRouter.configure_for_backend("clip")
+    runs = [
+        {
+            "config": "no_adapt",
+            "accuracy": 0.50,
+            "soft": 0.50,
+            "exact": 0.50,
+            "avg_flops": 24.8,
+            "flops": np.full(3, 24.8),
+            "adapt_rate": 0.0,
+            "method": "no_adapt",
+        },
+        {
+            "config": "memo",
+            "accuracy": 0.40,
+            "soft": 0.40,
+            "exact": 0.40,
+            "avg_flops": 138.6,
+            "flops": np.full(3, 138.6),
+            "adapt_rate": 1.0,
+            "method": "memo",
+        },
+    ]
+    oracle = oracle_recovery(np.array([1.0, 0.0, 0.3]), np.array([0.2, 1.0, 0.4]))
+    out = write_phase2_report(runs, str(tmp_path), backend="clip", oracle=oracle)
+    assert out["oracle"]["oracle_soft"] == pytest.approx((1.0 + 1.0 + 0.4) / 3)
+    landed = json.load(open(os.path.join(str(tmp_path), "oracle.json")))
+    summary = json.load(open(os.path.join(str(tmp_path), "summary.json")))
+    assert landed["oracle_soft"] == pytest.approx(out["oracle"]["oracle_soft"])
+    assert summary["oracle"]["base_soft"] == pytest.approx(1.3 / 3)

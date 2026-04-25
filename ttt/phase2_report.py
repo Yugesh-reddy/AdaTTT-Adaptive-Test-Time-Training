@@ -114,6 +114,7 @@ def write_phase2_report(
     runs: List[Dict[str, Any]],
     out_dir: str,
     backend: str = "clip",
+    oracle: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Write summary / Pareto / FLOPs ladder JSON under out_dir (results/phase2/)."""
     os.makedirs(out_dir, exist_ok=True)
@@ -148,6 +149,11 @@ def write_phase2_report(
         "flops_ladder": ladder,
         "backend": backend,
     }
+    if oracle is not None:
+        oracle_blob = _jsonable(oracle)
+        summary["oracle"] = oracle_blob
+        with open(os.path.join(out_dir, "oracle.json"), "w") as fh:
+            json.dump(oracle_blob, fh, indent=2)
     with open(os.path.join(out_dir, "summary.json"), "w") as fh:
         json.dump(summary, fh, indent=2)
     return summary

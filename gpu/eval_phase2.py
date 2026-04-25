@@ -30,6 +30,7 @@ from ttt.models import FullVQAModel
 from ttt.phase2_eval import evaluate_condition, order_methods
 from ttt.phase2_report import (
     compact_outcomes,
+    oracle_recovery,
     save_outcomes_npz,
     write_phase2_report,
 )
@@ -197,7 +198,10 @@ def main(argv: List[str] | None = None) -> int:
             method, soft, exact, adapt_rate, out["flops_g"].mean(),
         )
 
-    write_phase2_report(runs, args.output, backend=backend)
+    oracle = None
+    if base_soft is not None and memo_soft is not None:
+        oracle = oracle_recovery(base_soft, memo_soft)
+    write_phase2_report(runs, args.output, backend=backend, oracle=oracle)
     logger.info("Wrote report under %s", args.output)
     return 0
 
