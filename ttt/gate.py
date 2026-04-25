@@ -200,3 +200,4 @@ class AdaptiveRouter:
         total_flops = n_skip * self.SKIP_FLOPS + n_adapt * adapt_flops
 
         return (total_flops / total) / 1e9  # Convert to GFLOPs
+# Tune confidence threshold in gate module
