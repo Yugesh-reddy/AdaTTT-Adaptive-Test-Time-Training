@@ -826,3 +826,4 @@ def download_memotion2(data_dir: str) -> None:
     print("Annotation JSON format (list of dicts):")
     print('  [{"image": "img_001.jpg", "text": "OCR text", "sentiment": "positive"}, ...]')
     print("=" * 60)
+# Add VQA-v2 open-ended question validation
