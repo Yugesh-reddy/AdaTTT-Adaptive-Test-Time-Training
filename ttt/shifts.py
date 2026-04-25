@@ -33,9 +33,15 @@ def _gaussian_blur(image: Image.Image, severity: int, rng) -> Image.Image:
     return image.filter(ImageFilter.GaussianBlur(radius=GAUSSIAN_BLUR_SIGMA[severity]))
 
 
+def _identity(image: Image.Image, severity: int, rng) -> Image.Image:
+    """Clean-image control. Severity is ignored; pixels are unchanged."""
+    return image.convert("RGB")
+
+
 CORRUPTIONS: Dict[str, Any] = {
     "gaussian_noise": _gaussian_noise,
     "gaussian_blur": _gaussian_blur,
+    "identity": _identity,
 }
 
 

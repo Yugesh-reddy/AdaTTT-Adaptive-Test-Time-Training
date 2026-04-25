@@ -64,6 +64,15 @@ def test_unknown_corruption_and_severity_raise(image):
         corrupt(image, "gaussian_noise", 7)
 
 
+def test_identity_is_a_pixel_noop(image):
+    out = corrupt(image, "identity", 1, "42")
+    assert np.array_equal(_arr(out.convert("RGB")), _arr(image.convert("RGB")))
+    assert np.array_equal(
+        _arr(corrupt(image, "identity", 1, "42")),
+        _arr(corrupt(image, "identity", 5, "99")),
+    )
+
+
 def test_views_are_distinct_and_reproducible(image):
     views = augmix_views(image, n_views=4, sample_id="42")
     assert len(views) == 4

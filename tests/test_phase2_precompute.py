@@ -107,3 +107,8 @@ def test_encode_batch_keeps_raw_text_and_five_visuals():
 
 def test_view_layout_constant_matches_cache():
     assert tuple(pre.VIEW_LAYOUT) == VIEW_LAYOUT
+
+
+def test_identity_is_a_precompute_corruption():
+    assert "identity" in pre.corruption_kinds()
+    assert "gaussian_noise" in pre.corruption_kinds()

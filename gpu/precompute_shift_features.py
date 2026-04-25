@@ -55,6 +55,12 @@ def _shift_fns():
     return corrupt, augmix_views
 
 
+def corruption_kinds() -> List[str]:
+    """Registered shift kinds, including the identity (clean) control."""
+    from ttt.shifts import CORRUPTIONS
+    return sorted(CORRUPTIONS)
+
+
 def reject_clip_ln_ablation(enabled: bool) -> None:
     """CLIP-LN is a priced ablation or a skip — not the main cache path."""
     if enabled:
@@ -147,7 +153,7 @@ def main(argv: List[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Precompute 5-view shift features")
     parser.add_argument("--config", type=str, default="config/config.yaml")
     parser.add_argument("--corruption", type=str, required=True,
-                        choices=["gaussian_blur", "gaussian_noise"])
+                        choices=corruption_kinds())
     parser.add_argument("--severity", type=int, required=True, choices=[1, 2, 3, 4, 5])
     parser.add_argument("--output", type=str, required=True,
                         help="VM-local .pt path (Drive paths are rejected)")
