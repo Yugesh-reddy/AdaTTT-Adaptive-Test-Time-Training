@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-Phase 2 orchestrator — one A100 session: preflight + gaussian_blur s3 on eval 8k.
+Phase 2 orchestrator — Session C: identity (eval 8k) then gaussian noise s5.
 
 Reuses allocate / token refresh / budget guard from orch.py without editing
 that file (the guard re-reads orch.py from disk). Session is namespaced
 (ORCH_SESSION=adattt-p2). Relays compact json/npz only — never a feature cache.
 """
+import importlib.util
 import json
 import os
 import sys
@@ -13,9 +14,9 @@ import time
 
 # Defaults must land before `import orch` — orch binds SESSION/WORK/HELPER at import.
 os.environ.setdefault("ORCH_SESSION", "adattt-p2")
-os.environ.setdefault("ORCH_BUDGET_H", "6")
+os.environ.setdefault("ORCH_BUDGET_H", "4")
 os.environ.setdefault("ORCH_MAX_ALLOC", "8")
-os.environ.setdefault("ORCH_WORK", "/tmp/adattt-p2/orch1")
+os.environ.setdefault("ORCH_WORK", "/tmp/adattt-p2/orch-c")
 os.environ.setdefault("ORCH_SETUP_TIMEOUT_S", "3600")
 os.environ.setdefault("ORCH_POLL_S", "120")
 
@@ -41,21 +42,19 @@ import orch  # noqa: E402
 SESSION = orch.SESSION
 PROJECT = orch.PROJECT
 WORK = orch.WORK
-RESULT_REMOTE = "/content/AdaTTT/results/phase2/blur_s3"
-RESULT_LOCAL = os.path.join(PROJECT, "results", "phase2", "blur_s3")
+RESULT_REMOTE = "/content/AdaTTT/results/phase2"
+RESULT_LOCAL = os.path.join(PROJECT, "results", "phase2")
 CLIP_CKPT = os.path.join(PROJECT, "checkpoints", "phase1_clip", "best.pt")
-SMALL_ARTIFACTS = (
-    "summary.json",
-    "pareto.json",
-    "flops_ladder.json",
-    "tau.json",
-    "no_adapt.npz",
-    "tent.npz",
-    "eata.npz",
-    "memo.npz",
-    "memo_sar.npz",
-    "gated_memo_sar.npz",
-)
+
+
+def _phase2_session():
+    """Load ttt/phase2_session.py without importing the torch-heavy ttt package."""
+    path = os.path.join(PROJECT, "ttt", "phase2_session.py")
+    spec = importlib.util.spec_from_file_location("phase2_session", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
 
 orch.RUNS = {
     "blur": {
@@ -163,7 +162,7 @@ def prepare_vm(st):
     if "READY_OK" not in out:
         orch.log("  could not write launch.ready")
         return "failed"
-    orch.log("  launch armed (blur s3 eval 8k only)")
+    orch.log("  launch armed (session C: identity then noise s5)")
     return "ok"
 
 
@@ -177,19 +176,24 @@ def _fetch_results(st):
     orch.fetch_small("/content/PHASE2_DONE", os.path.join(WORK, "PHASE2_DONE"))
     orch.fetch_small("/content/phase2.log", os.path.join(RESULT_LOCAL, "phase2.log"))
     orch.fetch_small("/content/setup.log", os.path.join(WORK, "setup.log"))
-    for name in SMALL_ARTIFACTS:
-        remote = f"{RESULT_REMOTE}/{name}"
-        local = os.path.join(RESULT_LOCAL, name)
-        if orch.fetch_small(remote, local):
-            landed.append(name)
-        else:
-            missing.append(name)
-    # Refuse to download the cache even if it is still on the VM.
+    session = _phase2_session()
+    for cond in session.session_c_conditions():
+        remote_dir = f"{RESULT_REMOTE}/{cond['result_name']}"
+        local_dir = os.path.join(RESULT_LOCAL, cond["result_name"])
+        os.makedirs(local_dir, exist_ok=True)
+        for name in session.artifacts_for(cond):
+            remote = f"{remote_dir}/{name}"
+            local = os.path.join(local_dir, name)
+            rel = f"{cond['result_name']}/{name}"
+            if orch.fetch_small(remote, local):
+                landed.append(rel)
+            else:
+                missing.append(rel)
     orch.vm_exec(
-        "import os\n"
-        "p='/content/phase2_cache/blur_s3.pt'\n"
-        "print('CACHE_PRESENT=' + str(os.path.exists(p)))\n"
-        "print('CACHE_SIZE=' + str(os.path.getsize(p) if os.path.exists(p) else 0))",
+        "import glob, os\n"
+        "paths=glob.glob('/content/phase2_cache/*.pt')\n"
+        "print('CACHE_PRESENT=' + str(bool(paths)))\n"
+        "print('CACHE_SIZE=' + str(sum(os.path.getsize(p) for p in paths)))",
         90,
     )
     orch.log(f"  landed {landed}; missing {missing}")
@@ -198,8 +202,13 @@ def _fetch_results(st):
 
 def finalize(st, probe):
     landed, missing = _fetch_results(st)
+    session = _phase2_session()
+    essential = {
+        f"{c['result_name']}/summary.json" for c in session.session_c_conditions()
+    }
     summary = {
-        "condition": "gaussian_blur_s3",
+        "session": "C",
+        "conditions": [c["id"] for c in session.session_c_conditions()],
         "subset": "data/eval_subset_8k.json",
         "landed": landed,
         "missing": missing,
@@ -211,7 +220,6 @@ def finalize(st, probe):
     os.makedirs(RESULT_LOCAL, exist_ok=True)
     json.dump(summary, open(os.path.join(RESULT_LOCAL, "orch_summary.json"), "w"), indent=2)
     json.dump(summary, open(os.path.join(WORK, "run_summary.json"), "w"), indent=2)
-    essential = {"summary.json"}
     still = [m for m in missing if m in essential]
     return summary, still
 
@@ -337,7 +345,7 @@ def run_loop(st):
             return 4
 
         if info.get("done"):
-            orch.log("BLUR CONDITION COMPLETE — landing small artifacts (no cache)")
+            orch.log("SESSION C COMPLETE — landing small artifacts (no cache)")
             summary, missing = finalize(st, p)
             if missing:
                 orch.log(f"summary.json not landed {missing} — retrying once")

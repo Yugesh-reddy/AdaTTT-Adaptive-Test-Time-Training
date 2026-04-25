@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AdaTTT Phase 2 — launch one blur condition on eval 8k. No train_base, no grid.
+# AdaTTT Phase 2 — launch Session C (identity then noise s5). No train_base, no grid.
 set -euo pipefail
 ts() { date -u +%H:%M:%S; }
 REPO=/content/AdaTTT
@@ -20,7 +20,7 @@ cp -f /content/resume/clip_best.pt "$REPO/checkpoints/phase1_clip/best.pt"
 # Read-only copy on the VM. Never write back to the Mac checkpoint dir.
 
 cd "$REPO"
-echo "[$(ts)] launching blur s3 eval 8k"
+echo "[$(ts)] launching session C: identity then noise s5"
 PYTHONUNBUFFERED=1 nohup python gpu/vm_run_phase2.py \
   >> /content/phase2.log 2>&1 &
 echo "$!" > /content/blur.pid

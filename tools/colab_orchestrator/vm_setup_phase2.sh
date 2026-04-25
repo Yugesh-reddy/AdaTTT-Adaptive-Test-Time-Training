@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AdaTTT Phase 2 — VM setup. Val2014 + CLIP only. One blur condition after ready.
+# AdaTTT Phase 2 — VM setup. Val2014 + CLIP only. Session C after ready.
 # Runs ON the Colab VM. Idempotent on image count. Does not fetch train2014.
 set -euo pipefail
 ts() { date -u +%H:%M:%S; }
