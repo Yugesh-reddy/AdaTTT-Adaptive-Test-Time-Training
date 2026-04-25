@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Phase 2 first A100 session: preflight, then one blur condition on eval 8k.
+Phase 2 Session C: preflight, identity (skip+MEMO), then gaussian noise s5.
 
-Runs ON the Colab VM. Builds the 5-view cache on /content (never Drive),
-evaluates methods, writes compact npz/json, deletes the cache. Does not
-pull caches to the Mac. Does not run the full shift grid.
+Runs ON the Colab VM. Builds each 5-view cache on /content (never Drive),
+evaluates, writes compact npz/json, deletes the cache. Does not pull caches
+to the Mac. Does not run the remaining 8k grid.
 """
 
 from __future__ import annotations
@@ -18,11 +18,15 @@ import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from ttt.phase2_session import artifacts_for, session_c_conditions
+
 PROGRESS = os.environ.get("PHASE2_PROGRESS", "/content/phase2_progress.json")
 DONE = os.environ.get("PHASE2_DONE", "/content/PHASE2_DONE")
 PREFLIGHT = os.environ.get("PHASE2_PREFLIGHT", "/content/preflight.json")
-CACHE = os.environ.get("PHASE2_CACHE", "/content/phase2_cache/blur_s3.pt")
-OUTPUT = os.environ.get("PHASE2_OUTPUT", "/content/AdaTTT/results/phase2/blur_s3")
+CACHE_DIR = os.environ.get("PHASE2_CACHE_DIR", "/content/phase2_cache")
+RESULT_ROOT = os.environ.get(
+    "PHASE2_RESULT_ROOT", "/content/AdaTTT/results/phase2"
+)
 CHECKPOINT = os.environ.get(
     "PHASE2_CHECKPOINT", "/content/AdaTTT/checkpoints/phase1_clip/best.pt"
 )
@@ -67,28 +71,95 @@ def preflight() -> dict:
     return info
 
 
-def _delete_cache() -> None:
-    for path in (CACHE, os.path.splitext(CACHE)[0] + ".manifest.json"):
+def delete_cache(cache_path: str) -> None:
+    for path in (cache_path, os.path.splitext(cache_path)[0] + ".manifest.json"):
         if os.path.exists(path):
             os.remove(path)
             print(f"deleted {path}")
-    cache_dir = os.path.dirname(CACHE)
+    cache_dir = os.path.dirname(cache_path)
     if cache_dir and os.path.isdir(cache_dir) and not os.listdir(cache_dir):
         os.rmdir(cache_dir)
 
 
+def condition_output(cond: dict) -> str:
+    return os.path.join(RESULT_ROOT, cond["result_name"])
+
+
+def condition_cache(cond: dict) -> str:
+    return os.path.join(CACHE_DIR, cond["cache_name"])
+
+
+def condition_already_landed(cond: dict) -> bool:
+    """Skip a condition whose summary is already on this VM (preemption)."""
+    return os.path.isfile(os.path.join(condition_output(cond), "summary.json"))
+
+
+def run_condition(cond: dict, precompute_main, eval_main) -> None:
+    cache = condition_cache(cond)
+    output = condition_output(cond)
+    os.makedirs(os.path.dirname(cache) or ".", exist_ok=True)
+    os.makedirs(output, exist_ok=True)
+    if condition_already_landed(cond):
+        print(f"skip {cond['id']}: {output}/summary.json already present")
+        return
+    _progress(
+        stage="precompute",
+        step=f"{cond['id']} precompute 0",
+        condition=cond["id"],
+        n=0,
+    )
+    rc = precompute_main([
+        "--corruption", cond["corruption"],
+        "--severity", str(cond["severity"]),
+        "--output", cache,
+        "--subset", SUBSET,
+        "--dataset", "vqa_v2",
+        "--split", "val",
+        "--progress-file", PROGRESS,
+    ])
+    if rc:
+        raise SystemExit(rc)
+
+    import torch
+    torch.cuda.empty_cache()
+
+    _progress(stage="eval", step=f"{cond['id']} eval start", condition=cond["id"])
+    argv = [
+        "--features", cache,
+        "--checkpoint", CHECKPOINT,
+        "--output", output,
+        "--source", cond["source"],
+        "--progress-file", PROGRESS,
+        "--methods", *cond["methods"],
+    ]
+    rc = eval_main(argv)
+    if rc:
+        raise SystemExit(rc)
+    delete_cache(cache)
+    missing = [
+        name for name in artifacts_for(cond)
+        if not os.path.isfile(os.path.join(output, name))
+    ]
+    if missing:
+        raise SystemExit(f"{cond['id']} missing artifacts: {missing}")
+
+
 def main() -> int:
     os.chdir("/content/AdaTTT")
-    os.makedirs(os.path.dirname(CACHE), exist_ok=True)
-    os.makedirs(OUTPUT, exist_ok=True)
-    _progress(stage="preflight", step="preflight")
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    os.makedirs(RESULT_ROOT, exist_ok=True)
+    conditions = session_c_conditions()
+    done_ids = []
+    _progress(stage="preflight", step="preflight", conditions_done=done_ids)
     try:
         info = preflight()
         free_gb = shutil.disk_usage("/content").free / 1e9
         info["free_gb"] = round(free_gb, 1)
         _write_json(PREFLIGHT, info)
         if free_gb < 20:
-            raise SystemExit(f"not enough /content space for a 12GB cache ({free_gb:.1f} GB free)")
+            raise SystemExit(
+                f"not enough /content space for a 12GB cache ({free_gb:.1f} GB free)"
+            )
         resume_ckpt = "/content/resume/clip_best.pt"
         if os.path.isfile(resume_ckpt):
             os.makedirs(os.path.dirname(CHECKPOINT), exist_ok=True)
@@ -101,50 +172,40 @@ def main() -> int:
             sys.path.insert(0, gpu_dir)
         import eval_phase2 as eval_mod
         import precompute_shift_features as pre_mod
-        precompute_main = pre_mod.main
-        eval_main = eval_mod.main
 
-        _progress(stage="precompute", step="precompute 0", n=0)
-        rc = precompute_main([
-            "--corruption", "gaussian_blur",
-            "--severity", "3",
-            "--output", CACHE,
-            "--subset", SUBSET,
-            "--dataset", "vqa_v2",
-            "--split", "val",
-            "--progress-file", PROGRESS,
-        ])
-        if rc:
-            raise SystemExit(rc)
+        for cond in conditions:
+            _progress(
+                stage=cond["id"],
+                step=f"{cond['id']} start",
+                condition=cond["id"],
+                conditions_done=done_ids,
+            )
+            run_condition(cond, pre_mod.main, eval_mod.main)
+            done_ids.append(cond["id"])
+            _progress(
+                stage=cond["id"],
+                step=f"{cond['id']} landed",
+                condition=cond["id"],
+                conditions_done=list(done_ids),
+            )
 
-        import torch
-        torch.cuda.empty_cache()
-
-        _progress(stage="eval", step="eval start")
-        rc = eval_main([
-            "--features", CACHE,
-            "--checkpoint", CHECKPOINT,
-            "--output", OUTPUT,
-            "--source", "corruption_gaussian_blur_s3",
-            "--progress-file", PROGRESS,
-        ])
-        if rc:
-            raise SystemExit(rc)
-
-        _delete_cache()
-        artifacts = sorted(
-            f for f in os.listdir(OUTPUT)
-            if f.endswith((".json", ".npz", ".log"))
-        )
+        artifacts = {}
+        for cond in conditions:
+            out = condition_output(cond)
+            artifacts[cond["id"]] = sorted(
+                f for f in os.listdir(out)
+                if f.endswith((".json", ".npz", ".log"))
+            ) if os.path.isdir(out) else []
         done = {
             "done": True,
             "crash": False,
             "stage": "done",
             "step": "PHASE2_DONE",
-            "condition": "gaussian_blur_s3",
+            "conditions": [c["id"] for c in conditions],
+            "conditions_done": done_ids,
             "subset": SUBSET,
             "artifacts": artifacts,
-            "cache_deleted": not os.path.exists(CACHE),
+            "cache_deleted": not os.path.exists(CACHE_DIR) or not os.listdir(CACHE_DIR),
         }
         _write_json(PROGRESS, done)
         with open(DONE, "w") as fh:
@@ -154,7 +215,13 @@ def main() -> int:
         return 0
     except Exception:
         traceback.print_exc()
-        _progress(stage="failed", step="crash", crash=True, done=False)
+        _progress(
+            stage="failed",
+            step="crash",
+            crash=True,
+            done=False,
+            conditions_done=done_ids,
+        )
         raise
 
 
