@@ -112,3 +112,4 @@ class TestFLOPsComputation:
         without = AdaptiveRouter.compute_flops(router, info, k_steps=1, use_consistency=False)
         with_on = AdaptiveRouter.compute_flops(router, info, k_steps=1, use_consistency=True)
         assert with_on > without
+# Update test_gate with threshold edge cases
