@@ -5,9 +5,16 @@ data/*
 !data/eval_subset_8k.json
 !data/gate_train_subset_8k.json
 checkpoints/
-results/
+results/*
+!results/writeup/
+!results/writeup/**
 logs/
 figures/
+
+# Writeup figures live under results/writeup/figures; `figures/` would
+# otherwise ignore that directory even after the results/* exception.
+!results/writeup/figures/
+!results/writeup/figures/**
 
 # Binary files
 *.pt
