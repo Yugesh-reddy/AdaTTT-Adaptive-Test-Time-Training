@@ -925,3 +925,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+# Polish figure generation color palette
