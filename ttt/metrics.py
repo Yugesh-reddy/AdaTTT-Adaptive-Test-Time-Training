@@ -260,3 +260,4 @@ def mcnemar_test(
         "p_value": float(p_value),
         "significant_at_005": p_value < 0.05,
     }
+# Fix metrics computation for VizWiz answers
