@@ -573,3 +573,4 @@ class FullVQAModel(nn.Module):
                 params.append((f"{module_name}.{name}", param))
         return params
 # Optimize model forward pass memory usage
+# Update adaptive router for feature-based prediction
