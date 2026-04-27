@@ -9,3 +9,4 @@ matplotlib
 scipy
 tqdm
 gradio>=4.0
+# Pin dependency versions in requirements.txt
