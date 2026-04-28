@@ -48,7 +48,7 @@ def test_ladder_uses_sample_flops_and_flags_legacy_spec():
     ].lower()
     # The CLIP numbers the handoff cites.
     assert tent == pytest.approx(43.4, abs=0.1)
-    assert memo4 == pytest.approx(138.6, abs=0.2)
+    assert memo4 == pytest.approx(175.8, abs=0.2)
 
 
 def test_oracle_recovery_picks_the_better_per_sample():

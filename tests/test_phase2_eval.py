@@ -101,8 +101,9 @@ def test_gated_mixes_skip_and_adapt_flops():
     # tau=0 adapts everyone whose score >= 0, which is all of them.
     skip = AdaptiveRouter.sample_flops(False) / 1e9
     adapt = AdaptiveRouter.sample_flops(True, n_aug=4, k_steps=1) / 1e9
-    got = {round(float(x), 5) for x in out["flops_g"]}
-    assert got.issubset({round(skip, 5), round(adapt, 5)})
+    # flops_g is stored as float32, so compare with a tolerance, not rounding.
+    got = out["flops_g"].astype(float)
+    assert np.all(np.isclose(got, skip, atol=1e-3) | np.isclose(got, adapt, atol=1e-3))
 
 
 def test_unk_index_gets_zero_soft_credit():

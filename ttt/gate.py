@@ -235,9 +235,12 @@ class AdaptiveRouter:
         treating augmented views as free because they were precomputed offline.
 
         Every request pays the base forward. An adapted request additionally
-        pays, for each augmented view, an image-tower encode plus a fusion and
-        head forward — the text tower is encoded once and reused, since AugMix
-        perturbs pixels only.
+        pays, for each augmented view, an image-tower encode (once; the tower is
+        frozen) plus, on every step, a fusion and head forward AND backward
+        through that view — the loss H(mean over views) depends on all of them.
+        The prediction is then re-run on the original with the updated weights.
+        The text tower is encoded once and reused, since AugMix perturbs pixels
+        only.
 
         Args:
             adapted: Whether the gate fired for this sample.
@@ -256,13 +259,18 @@ class AdaptiveRouter:
         if not adapted:
             return cost
 
-        per_view = (
-            AdaptiveRouter.IMAGE_ENCODE_FLOPS
-            + AdaptiveRouter.FUSION_FLOPS
-            + AdaptiveRouter.PRED_FLOPS
-        )
-        cost += n_aug * per_view
-        cost += k_steps * AdaptiveRouter.TTT_STEP_FLOPS
+        if n_aug == 0:
+            # Entropy on the original view (TENT-style). Step 1 reuses the base
+            # forward; each step adds a backward plus the next forward, the last
+            # of which is the post-update prediction.
+            return cost + k_steps * AdaptiveRouter.TTT_STEP_FLOPS
+
+        # MEMO-style. An earlier version charged one backward per step whatever
+        # n_aug was: exact for one view, but MEMO4 at K=1 was billed 138.6G of
+        # the 175.8G it runs (three view backwards missing).
+        cost += n_aug * AdaptiveRouter.IMAGE_ENCODE_FLOPS
+        cost += k_steps * n_aug * AdaptiveRouter.TTT_STEP_FLOPS
+        cost += AdaptiveRouter.FUSION_FLOPS + AdaptiveRouter.PRED_FLOPS
         return cost
 
     def compute_flops(

@@ -322,6 +322,25 @@ class TestDeploymentCost:
             f"is being reported instead of the deployment cost."
         )
 
+    def test_memo_backward_is_charged_through_every_view(self):
+        """H(mean over views) backpropagates through all n_aug view forwards.
+
+        Charging one backward per step undercounted MEMO4 by three backwards
+        (138.6G billed of 175.8G run under CLIP).
+        """
+        one = AdaptiveRouter.sample_flops(adapted=True, n_aug=1, k_steps=1)
+        four = AdaptiveRouter.sample_flops(adapted=True, n_aug=4, k_steps=1)
+        per_view = AdaptiveRouter.IMAGE_ENCODE_FLOPS + AdaptiveRouter.TTT_STEP_FLOPS
+        assert four - one == pytest.approx(3 * per_view)
+        two_steps = AdaptiveRouter.sample_flops(adapted=True, n_aug=4, k_steps=2)
+        assert two_steps - four == pytest.approx(4 * AdaptiveRouter.TTT_STEP_FLOPS)
+
+    def test_entropy_on_the_original_view_charges_one_step(self):
+        """TENT-style (n_aug=0): step 1 reuses the base forward."""
+        skip = AdaptiveRouter.sample_flops(adapted=False)
+        tent = AdaptiveRouter.sample_flops(adapted=True, n_aug=0, k_steps=1)
+        assert tent - skip == pytest.approx(AdaptiveRouter.TTT_STEP_FLOPS)
+
     def test_layernorm_only_does_not_reduce_backward_flops(self):
         """Gradients still traverse the whole fusion stack to reach the affines.
 

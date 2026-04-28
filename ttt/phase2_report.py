@@ -39,10 +39,12 @@ def sample_flops_ladder(backend: str = "clip") -> Dict[str, Any]:
         "used_for_reporting": "sample_flops",
         "legacy_ladder_note": (
             "The 58/93/128 GFLOPs ladder in the original spec does not match "
-            "AdaptiveRouter.sample_flops under CLIP (base ~24.8G, TENT k=1 → ~43.4G, "
-            "MEMO2 → ~91.0G, MEMO4 → ~138.6G). Report sample_flops; the legacy "
-            "numbers assumed a different (unknown) accounting. layernorm_only is "
-            "Δ=0 FLOPs by design (optimizer state, not compute)."
+            "AdaptiveRouter.sample_flops. MEMO is charged a fusion forward and "
+            "backward through every view on every step, plus the post-update "
+            "prediction; results/phase2 npz files written before 2026-09-18 carry "
+            "an older accounting that billed one backward per step (MEMO4 138.6G "
+            "instead of ~175.8G) — scripts/writeup_numbers.py recomputes them. "
+            "layernorm_only is Δ=0 FLOPs by design (optimizer state, not compute)."
         ),
     }
 
