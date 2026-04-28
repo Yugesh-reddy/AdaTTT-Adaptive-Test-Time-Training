@@ -22,3 +22,4 @@ setup(
         "tqdm",
     ],
 )
+# Update setup.py package metadata
