@@ -117,8 +117,13 @@ def write_phase2_report(
     out_dir: str,
     backend: str = "clip",
     oracle: Optional[Dict[str, Any]] = None,
+    tau: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Write summary / Pareto / FLOPs ladder JSON under out_dir (results/phase2/)."""
+    """Write summary / Pareto / FLOPs ladder JSON under out_dir (results/phase2/).
+
+    `tau` records where the gate threshold came from (protocol held_out, fixed,
+    fit or in_sample), so a gated number is never read without its provenance.
+    """
     os.makedirs(out_dir, exist_ok=True)
     ladder = sample_flops_ladder(backend)
     with open(os.path.join(out_dir, "flops_ladder.json"), "w") as fh:
@@ -151,6 +156,8 @@ def write_phase2_report(
         "flops_ladder": ladder,
         "backend": backend,
     }
+    if tau is not None:
+        summary["tau"] = _jsonable(tau)
     if oracle is not None:
         oracle_blob = _jsonable(oracle)
         summary["oracle"] = oracle_blob

@@ -18,7 +18,7 @@ import argparse
 import os
 import sys
 import json
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import torch
@@ -57,6 +57,59 @@ def _write_progress(path: Optional[str], payload: dict) -> None:
     os.replace(tmp, path)
 
 
+def resolve_tau_protocol(args: argparse.Namespace, parser: argparse.ArgumentParser) -> Optional[Dict[str, Any]]:
+    """Decide where the gate threshold comes from, before anything is loaded.
+
+    The eval 8k is report-only. A τ picked by looking at the outcomes being
+    reported makes every gated number an in-sample upper bound, and the gate
+    "abstaining correctly" a tautology. The held-out path is --fit-tau on
+    gate_train_subset_8k under the same corruption, then --tau-file here.
+    """
+    methods = set(args.methods)
+    chosen = [flag for flag, on in (("--tau", args.tau is not None),
+                                    ("--tau-file", args.tau_file is not None),
+                                    ("--fit-tau", args.fit_tau)) if on]
+    if len(chosen) > 1:
+        parser.error(f"pick one τ source, got {' and '.join(chosen)}")
+    if args.fit_tau and not {"no_adapt", "memo_sar"} <= methods:
+        parser.error("--fit-tau tunes τ on no_adapt vs memo_sar, the adapter the gate "
+                     "runs; include both methods")
+    if "gated_memo_sar" in methods and not chosen:
+        parser.error("gated_memo_sar needs a τ source: --tau-file with a tau.json from a "
+                     "--fit-tau run on gate_train_subset_8k (held out), --tau for a fixed "
+                     "value, or --fit-tau to tune on this run (gated numbers are then "
+                     "in-sample).")
+    if args.tau_file is not None:
+        with open(args.tau_file) as fh:
+            rec = json.load(fh)
+        if rec.get("source") == args.source:
+            parser.error(f"{args.tau_file} was fit on source '{args.source}', the data "
+                         "being reported. Fit τ on gate_train_subset_8k instead.")
+        return {
+            "protocol": "held_out",
+            "tau": float(rec["tau"]),
+            "tuned_on": rec.get("source"),
+            "tau_file": args.tau_file,
+            "target_method": rec.get("target_method"),
+            "fit_gated_metric": rec.get("gated_metric"),
+            "fit_adapt_rate": rec.get("adapt_rate"),
+        }
+    if args.tau is not None:
+        return {"protocol": "fixed", "tau": float(args.tau)}
+    return None
+
+
+def fit_tau_record(gate_scores, base_soft, adapted_soft, source: str, reported_here: bool) -> Dict[str, Any]:
+    """Tune τ against memo_sar, the adapter gated_memo_sar actually runs."""
+    chosen = tune_tau(gate_scores, base_soft, adapted_soft, source=source)
+    chosen["target_method"] = "memo_sar"
+    chosen["protocol"] = "in_sample" if reported_here else "fit"
+    if reported_here:
+        chosen["note"] = ("τ was selected on the outcomes being reported; gated numbers "
+                          "from this run are an in-sample upper bound.")
+    return chosen
+
+
 def main(argv: List[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Phase 2 TTA eval (no VM alloc)")
     parser.add_argument("--config", type=str, default="config/config.yaml")
@@ -66,13 +119,21 @@ def main(argv: List[str] | None = None) -> int:
     parser.add_argument("--output", type=str, default="results/phase2")
     parser.add_argument("--methods", nargs="+", default=list(METHODS))
     parser.add_argument("--tau", type=float, default=None,
-                        help="If omitted, tuned on this condition's base vs MEMO")
+                        help="Fixed τ for gated_memo_sar (protocol 'fixed')")
+    parser.add_argument("--tau-file", type=str, default=None,
+                        help="tau.json from a --fit-tau run on gate_train_subset_8k "
+                             "(protocol 'held_out')")
+    parser.add_argument("--fit-tau", action="store_true",
+                        help="Fit τ on this run's no_adapt vs memo_sar outcomes and write "
+                             "tau.json. Run it on gate_train_subset_8k; with "
+                             "gated_memo_sar in the same run the gated numbers are in-sample")
     parser.add_argument("--source", type=str, default="corruption",
                         help="τ-tuning source tag; VQA-CP is rejected")
     parser.add_argument("--k", type=int, default=1)
     parser.add_argument("--progress-file", type=str, default=None,
                         help="Optional JSON heartbeat (VM probe); never a cache path")
     args = parser.parse_args(argv)
+    tau_info = resolve_tau_protocol(args, parser)
 
     try:
         features_path = assert_cache_path_allowed(args.features)
@@ -107,23 +168,21 @@ def main(argv: List[str] | None = None) -> int:
     os.makedirs(args.output, exist_ok=True)
 
     base_soft = None
+    base_pred = None
     memo_soft = None
+    memo_sar_soft = None
     gate_scores = None
-    tau = args.tau
+    tau = tau_info["tau"] if tau_info else None
     methods = order_methods(args.methods)
 
     for method in methods:
         if method == "gated_memo_sar" and tau is None:
-            if base_soft is None or memo_soft is None or gate_scores is None:
-                raise RuntimeError(
-                    "gated_memo_sar needs no_adapt and memo first to tune τ "
-                    "(or pass --tau). τ is never tuned on VQA-CP."
-                )
-            chosen = tune_tau(gate_scores, base_soft, memo_soft, source=args.source)
-            tau = float(chosen["tau"])
-            with open(os.path.join(args.output, "tau.json"), "w") as fh:
-                json.dump(chosen, fh, indent=2)
-            logger.info("Tuned τ=%s on %s (not VQA-CP)", chosen["tau"], args.source)
+            # Only reachable with --fit-tau: resolve_tau_protocol refused the rest.
+            tau_info = fit_tau_record(gate_scores, base_soft, memo_sar_soft,
+                                      source=args.source, reported_here=True)
+            tau = float(tau_info["tau"])
+            logger.warning("τ=%.4f tuned on the reported outcomes (%s): gated numbers "
+                           "are in-sample", tau, args.source)
 
         adapter = None
         if method != "no_adapt":
@@ -164,9 +223,12 @@ def main(argv: List[str] | None = None) -> int:
         )
         if method == "no_adapt":
             base_soft = out["soft_score"].copy()
+            base_pred = out["prediction"].copy()
             gate_scores = out["gate_score"].copy()
         if method == "memo":
             memo_soft = out["soft_score"].copy()
+        if method == "memo_sar":
+            memo_sar_soft = out["soft_score"].copy()
 
         packed = compact_outcomes(
             prediction=out["prediction"],
@@ -181,7 +243,24 @@ def main(argv: List[str] | None = None) -> int:
         exact = float((out["prediction"] == out["ground_truth"]).mean())
         soft = float(out["soft_score"].mean())
         adapt_rate = float(out["adapted"].mean())
+        n_total = len(out["prediction"])
+        # How far the adapter actually moved the model. An adapter that changes
+        # <1% of answers cannot show a TTA effect either way.
+        flips = None
+        if base_pred is not None and method != "no_adapt":
+            flips = int((out["prediction"] != base_pred).sum())
+            if adapt_rate > 0 and flips < 0.01 * n_total:
+                logger.warning("%s changed %d of %d predictions (<1%%): the adapter "
+                               "barely moves the model; check the step size before "
+                               "reading this as a TTA result", method, flips, n_total)
+        gate_pass = None
+        if method == "gated_memo_sar":
+            # score >= τ passes the gate; SAR's entropy filter can still refuse,
+            # so the realized adapt rate can be lower than the pass rate.
+            gate_pass = float((out["gate_score"] >= tau).mean())
         runs.append({
+            "pred_flips_vs_no_adapt": flips,
+            "gate_pass_rate": gate_pass,
             "config": method,
             "method": method,
             "accuracy": soft,
@@ -198,10 +277,19 @@ def main(argv: List[str] | None = None) -> int:
             method, soft, exact, adapt_rate, out["flops_g"].mean(),
         )
 
+    if args.fit_tau and tau_info is None:
+        # Fit-only run (gate_train_subset_8k): the τ is for a different split.
+        tau_info = fit_tau_record(gate_scores, base_soft, memo_sar_soft,
+                                  source=args.source, reported_here=False)
+        logger.info("Fit τ=%.4f on %s for a held-out eval", tau_info["tau"], args.source)
+    if tau_info is not None:
+        with open(os.path.join(args.output, "tau.json"), "w") as fh:
+            json.dump(tau_info, fh, indent=2)
+
     oracle = None
     if base_soft is not None and memo_soft is not None:
         oracle = oracle_recovery(base_soft, memo_soft)
-    write_phase2_report(runs, args.output, backend=backend, oracle=oracle)
+    write_phase2_report(runs, args.output, backend=backend, oracle=oracle, tau=tau_info)
     logger.info("Wrote report under %s", args.output)
     return 0
 

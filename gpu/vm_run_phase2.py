@@ -3,7 +3,9 @@
 Phase 2 Session C: preflight, identity (skip+MEMO), then gaussian noise s5.
 
 Runs ON the Colab VM. Builds each 5-view cache on /content (never Drive),
-evaluates, writes compact npz/json, deletes the cache. Does not pull caches
+evaluates, writes compact npz/json, deletes the cache. A condition with
+gated_memo_sar first fits τ on gate_train_subset_8k under the same corruption
+(one more cache build), then evaluates the eval 8k with that τ. Does not pull caches
 to the Mac. Does not run the remaining 8k grid.
 """
 
@@ -18,7 +20,13 @@ import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from ttt.phase2_session import artifacts_for, session_c_conditions
+from ttt.phase2_session import (
+    GATE_SUBSET as _GATE_SUBSET,
+    artifacts_for,
+    needs_tau_fit,
+    session_c_conditions,
+    tau_fit_source,
+)
 
 PROGRESS = os.environ.get("PHASE2_PROGRESS", "/content/phase2_progress.json")
 DONE = os.environ.get("PHASE2_DONE", "/content/PHASE2_DONE")
@@ -31,6 +39,7 @@ CHECKPOINT = os.environ.get(
     "PHASE2_CHECKPOINT", "/content/AdaTTT/checkpoints/phase1_clip/best.pt"
 )
 SUBSET = os.environ.get("PHASE2_SUBSET", "data/eval_subset_8k.json")
+GATE_SUBSET = os.environ.get("PHASE2_GATE_SUBSET", _GATE_SUBSET)
 
 
 def _write_json(path: str, payload) -> None:
@@ -94,31 +103,79 @@ def condition_already_landed(cond: dict) -> bool:
     return os.path.isfile(os.path.join(condition_output(cond), "summary.json"))
 
 
-def run_condition(cond: dict, precompute_main, eval_main) -> None:
-    cache = condition_cache(cond)
-    output = condition_output(cond)
+def tau_fit_dir(cond: dict) -> str:
+    return os.path.join(condition_output(cond), "tau_fit")
+
+
+def tau_fit_cache(cond: dict) -> str:
+    stem, ext = os.path.splitext(cond["cache_name"])
+    return os.path.join(CACHE_DIR, f"{stem}_gate_train{ext}")
+
+
+def _precompute(precompute_main, cond: dict, cache: str, subset: str) -> None:
     os.makedirs(os.path.dirname(cache) or ".", exist_ok=True)
-    os.makedirs(output, exist_ok=True)
-    if condition_already_landed(cond):
-        print(f"skip {cond['id']}: {output}/summary.json already present")
-        return
-    _progress(
-        stage="precompute",
-        step=f"{cond['id']} precompute 0",
-        condition=cond["id"],
-        n=0,
-    )
     rc = precompute_main([
         "--corruption", cond["corruption"],
         "--severity", str(cond["severity"]),
         "--output", cache,
-        "--subset", SUBSET,
+        "--subset", subset,
         "--dataset", "vqa_v2",
         "--split", "val",
         "--progress-file", PROGRESS,
     ])
     if rc:
         raise SystemExit(rc)
+
+
+def fit_tau_on_gate_train(cond: dict, precompute_main, eval_main) -> str:
+    """Held-out τ: fit on GATE_SUBSET under the same corruption, return tau.json.
+
+    Costs one more cache build plus two methods per gated condition. Reuses a
+    tau.json already on this VM, so a preempted session does not refit.
+    """
+    out = tau_fit_dir(cond)
+    tau_path = os.path.join(out, "tau.json")
+    if os.path.isfile(tau_path):
+        print(f"reuse {tau_path}")
+        return tau_path
+    cache = tau_fit_cache(cond)
+    _progress(stage="tau_fit", step=f"{cond['id']} gate-train precompute", condition=cond["id"])
+    _precompute(precompute_main, cond, cache, GATE_SUBSET)
+    rc = eval_main([
+        "--features", cache,
+        "--checkpoint", CHECKPOINT,
+        "--output", out,
+        "--source", tau_fit_source(cond),
+        "--progress-file", PROGRESS,
+        "--methods", "no_adapt", "memo_sar",
+        "--fit-tau",
+    ])
+    if rc:
+        raise SystemExit(rc)
+    delete_cache(cache)
+    if not os.path.isfile(tau_path):
+        raise SystemExit(f"{cond['id']}: τ fit wrote no {tau_path}")
+    return tau_path
+
+
+def run_condition(cond: dict, precompute_main, eval_main) -> None:
+    cache = condition_cache(cond)
+    output = condition_output(cond)
+    os.makedirs(output, exist_ok=True)
+    if condition_already_landed(cond):
+        print(f"skip {cond['id']}: {output}/summary.json already present")
+        return
+    tau_args = []
+    if needs_tau_fit(cond):
+        tau_args = ["--tau-file", fit_tau_on_gate_train(cond, precompute_main, eval_main)]
+
+    _progress(
+        stage="precompute",
+        step=f"{cond['id']} precompute 0",
+        condition=cond["id"],
+        n=0,
+    )
+    _precompute(precompute_main, cond, cache, SUBSET)
 
     import torch
     torch.cuda.empty_cache()
@@ -131,6 +188,7 @@ def run_condition(cond: dict, precompute_main, eval_main) -> None:
         "--source", cond["source"],
         "--progress-file", PROGRESS,
         "--methods", *cond["methods"],
+        *tau_args,
     ]
     rc = eval_main(argv)
     if rc:

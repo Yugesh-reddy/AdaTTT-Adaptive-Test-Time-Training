@@ -27,7 +27,11 @@ SampleSource = Union[Mapping[str, Any], Sequence[Any]]
 
 
 def order_methods(methods: Sequence[str]) -> list:
-    """Run no_adapt and memo before gated_memo_sar so τ can be tuned first."""
+    """Run no_adapt first and gated_memo_sar last.
+
+    A τ fitted in the same run (--fit-tau) needs the no_adapt and memo_sar
+    outcomes before the gated pass.
+    """
     methods = list(methods)
     seen = set()
     ordered = []

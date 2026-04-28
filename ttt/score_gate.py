@@ -4,6 +4,12 @@ Weighted-score gate and MaxProb AUROC/AURC for Phase 2.
 The gate is a weighted sum of signals (entropy, 1-MaxProb, margin), compared
 to a single τ — not a conjunction of thresholds. τ is tuned on corruption
 conditions only; VQA-CP test is rejected so we cannot Goodhart it.
+
+In gpu/eval_phase2.py the gate routes into memo_sar, whose SAR filter refuses
+high-entropy samples, while this score rises with entropy. The rule actually
+applied is score >= τ AND entropy < 0.4·ln C, so eval records gate_pass_rate
+next to adapt_rate, and τ is tuned against memo_sar outcomes. The held-out
+protocol fits τ on gate_train_subset_8k, never on the eval 8k it reports.
 """
 
 from __future__ import annotations

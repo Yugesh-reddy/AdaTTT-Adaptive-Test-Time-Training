@@ -18,6 +18,19 @@ ALL_METHODS: Sequence[str] = (
 
 ID_METHODS: Sequence[str] = ("no_adapt", "memo")
 
+# τ is fit here, under the same corruption, never on the report-only eval 8k.
+GATE_SUBSET = "data/gate_train_subset_8k.json"
+
+
+def needs_tau_fit(condition: Dict[str, Any]) -> bool:
+    """Gated conditions fit τ on GATE_SUBSET first (held-out protocol)."""
+    return "gated_memo_sar" in condition["methods"]
+
+
+def tau_fit_source(condition: Dict[str, Any]) -> str:
+    """Source tag for the gate-train fit; differs from the eval source by design."""
+    return f"gate_train_{condition['source']}"
+
 
 def session_c_conditions() -> List[Dict[str, Any]]:
     """Identity skip+MEMO, then gaussian noise s5 with the full method set."""
@@ -51,5 +64,5 @@ def artifacts_for(condition: Dict[str, Any]) -> List[str]:
     if "no_adapt" in methods and "memo" in methods:
         names.append("oracle.json")
     if "gated_memo_sar" in methods:
-        names.append("tau.json")
+        names.extend(["tau.json", "tau_fit/tau.json", "tau_fit/summary.json"])
     return names

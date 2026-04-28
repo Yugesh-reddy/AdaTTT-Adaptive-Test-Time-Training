@@ -174,3 +174,64 @@ def test_eval_phase2_script_does_not_stack_full_cache():
     assert "_load_all" not in src
     assert "batch_size=len(ds)" not in src
     assert "order_methods" in src
+
+
+# --- τ provenance: the eval 8k is report-only --------------------------------
+
+import argparse
+import json
+import sys as _sys
+
+_sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "gpu"))
+import eval_phase2  # noqa: E402
+
+
+def _argv(*extra):
+    return ["--features", "/content/x.pt", "--checkpoint", "ck.pt", *extra]
+
+
+def test_gated_without_a_tau_source_is_refused():
+    with pytest.raises(SystemExit) as err:
+        eval_phase2.main(_argv("--methods", "no_adapt", "memo_sar", "gated_memo_sar"))
+    assert err.value.code == 2
+
+
+def test_fit_tau_needs_the_adapter_the_gate_runs():
+    with pytest.raises(SystemExit) as err:
+        eval_phase2.main(_argv("--methods", "no_adapt", "memo", "--fit-tau"))
+    assert err.value.code == 2
+
+
+def test_tau_file_fit_on_the_reported_source_is_refused(tmp_path):
+    tau = tmp_path / "tau.json"
+    tau.write_text(json.dumps({"tau": 0.4, "source": "corruption_gaussian_noise_s5"}))
+    with pytest.raises(SystemExit) as err:
+        eval_phase2.main(_argv("--methods", "no_adapt", "gated_memo_sar",
+                               "--source", "corruption_gaussian_noise_s5",
+                               "--tau-file", str(tau)))
+    assert err.value.code == 2
+
+
+def test_tau_file_from_gate_train_is_held_out(tmp_path):
+    tau = tmp_path / "tau.json"
+    tau.write_text(json.dumps({"tau": 0.4, "source": "gate_train_corruption_gaussian_noise_s5",
+                               "target_method": "memo_sar"}))
+    parser = argparse.ArgumentParser()
+    args = argparse.Namespace(methods=["no_adapt", "gated_memo_sar"], tau=None,
+                              tau_file=str(tau), fit_tau=False,
+                              source="corruption_gaussian_noise_s5")
+    info = eval_phase2.resolve_tau_protocol(args, parser)
+    assert info["protocol"] == "held_out"
+    assert info["tuned_on"] == "gate_train_corruption_gaussian_noise_s5"
+    assert info["tau"] == pytest.approx(0.4)
+
+
+def test_in_sample_fit_is_labelled():
+    rec = eval_phase2.fit_tau_record(np.array([0.1, 0.9]), np.array([1.0, 0.0]),
+                                     np.array([1.0, 1.0]), source="corruption_x",
+                                     reported_here=True)
+    assert rec["protocol"] == "in_sample" and rec["target_method"] == "memo_sar"
+    fit = eval_phase2.fit_tau_record(np.array([0.1, 0.9]), np.array([1.0, 0.0]),
+                                     np.array([1.0, 1.0]), source="gate_train_x",
+                                     reported_here=False)
+    assert fit["protocol"] == "fit"
