@@ -34,6 +34,7 @@ releases any orphaned VM it created.
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -53,16 +54,20 @@ PROJECTION_AFTER_S = int(os.environ.get("ORCH_PROJECTION_AFTER_S", "1200"))
 # billing an idle A100 before it was lost; past this deadline, cut it loose.
 SETUP_TIMEOUT_S = int(os.environ.get("ORCH_SETUP_TIMEOUT_S", "2700"))
 GUARD_ENABLED = os.environ.get("ORCH_GUARD", "1") == "1"
-HELPER = os.environ.get(
-    "ORCH_HELPER",
-    "/Users/yugesh/.local/share/uv/tools/google-colab-cli/bin/python "
-    + os.path.join(os.path.dirname(os.path.abspath(__file__)), "colab_refresh.py"),
-).split()
+# ORCH_HELPER is parsed like a shell command line, so a path with spaces
+# ("My Drive") must be quoted. The default is a list and is never split.
+_HELPER_CMD = os.environ.get("ORCH_HELPER")
+HELPER = shlex.split(_HELPER_CMD) if _HELPER_CMD else [
+    "/Users/yugesh/.local/share/uv/tools/google-colab-cli/bin/python",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "colab_refresh.py"),
+]
 PART = int(os.environ.get("ORCH_PART_BYTES", str(64 * 1024 * 1024)))
 PREFLIGHT_SIZES = [int(x) for x in os.environ.get(
     "ORCH_PREFLIGHT_SIZES", f"{64 << 20},{16 << 20},{4 << 20}").split(",")]
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+# Built by build_payload.py; untracked. Tests point this at a dummy file.
+PAYLOAD = os.environ.get("ORCH_PAYLOAD", os.path.join(HERE, "adattt_phase1.tgz"))
 PROJECT = os.environ.get(
     "ORCH_PROJECT",
     "/Users/yugesh/Library/CloudStorage/GoogleDrive-yugeshreddysappidi@gmail.com/My Drive/AdaTTT",
@@ -552,7 +557,7 @@ def run_finished(run):
 def prepare_vm(st):
     if not preflight_transfer(st):
         return "transfer_broken"
-    for local, remote in [(os.path.join(HERE, "adattt_phase1.tgz"), "/content/adattt_phase1.tgz"),
+    for local, remote in [(PAYLOAD, "/content/adattt_phase1.tgz"),
                           (os.path.join(HERE, "vm_setup.sh"), "/content/vm_setup.sh"),
                           (os.path.join(HERE, "vm_launch.sh"), "/content/vm_launch.sh"),
                           (os.path.join(HERE, "vm_sync.sh"), "/content/vm_sync.sh")]:

@@ -30,3 +30,7 @@ __pycache__/
 
 # OS
 .DS_Store
+
+# Colab orchestrator build outputs (payload tarballs; old in-repo test output)
+tools/colab_orchestrator/*.tgz
+tools/colab_orchestrator/orchtest/

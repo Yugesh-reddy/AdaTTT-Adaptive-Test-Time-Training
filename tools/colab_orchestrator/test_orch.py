@@ -1,8 +1,16 @@
 """Scenario tests for orch.py against fake_colab.py — no Google calls."""
-import importlib.util, json, os, shutil, subprocess, sys, time
+import importlib.util, json, os, shlex, shutil, subprocess, sys, tempfile, time
 
 S = os.path.dirname(os.path.abspath(__file__))
-REAL_PROJECT = "/Users/yugesh/Library/CloudStorage/GoogleDrive-yugeshreddysappidi@gmail.com/My Drive/AdaTTT"
+REAL_PROJECT = os.path.dirname(os.path.dirname(S))
+# Scenario output goes to a temp dir, not next to this file: the repo lives on
+# Google Drive and every run would sync a tree of fake-VM files.
+ROOT = os.environ.get("ORCH_TEST_DIR") or tempfile.mkdtemp(prefix="adattt-orchtest-")
+# The real payload is an untracked build artifact; the fake VM only copies it.
+PAYLOAD = os.path.join(ROOT, "adattt_phase1.tgz")
+with open(PAYLOAD, "wb") as _fh:
+    _fh.write(b"fake payload")
+HELPER = shlex.join([sys.executable, os.path.join(S, "fake_colab.py"), "helper"])
 CEILING = os.path.join(REAL_PROJECT, "scripts", "06_ceiling_check.py")
 spec = importlib.util.spec_from_file_location("ceiling", CEILING)
 ceiling = importlib.util.module_from_spec(spec)
@@ -60,7 +68,7 @@ def resumed(run):
 
 
 def scenario(name, extra, want, checks, seed=None):
-    base = os.path.join(S, "orchtest", name)
+    base = os.path.join(ROOT, name)
     shutil.rmtree(base, ignore_errors=True)
     for rel, content in (seed or {}).items():
         os.makedirs(os.path.dirname(os.path.join(base, "work", rel)), exist_ok=True)
@@ -72,7 +80,7 @@ def scenario(name, extra, want, checks, seed=None):
                ORCH_PROJECT=proj, ORCH_WORK=os.path.join(base, "work"), ORCH_POLL_S="1",
                ORCH_PART_BYTES="65536", ORCH_GUARD="0", ORCH_PROJECTION_AFTER_S="2",
                ORCH_WEDGED_AFTER="3", ORCH_PREFLIGHT_SIZES="65536",
-               ORCH_HELPER=f"{sys.executable} {os.path.join(S, 'fake_colab.py')} helper",
+               ORCH_HELPER=HELPER, ORCH_PAYLOAD=PAYLOAD,
                FAKE_T_SETUP="1", FAKE_T_EPOCH="1.5")
     os.makedirs(env["FAKE_DIR"])
     env.update(extra)
@@ -156,13 +164,13 @@ results = [
 ]
 def emergency_stop_releases_pruned_orphan():
     """The budget guard's stop must reach a VM whose session the CLI already pruned."""
-    base = os.path.join(S, "orchtest", "emergency_stop")
+    base = os.path.join(ROOT, "emergency_stop")
     shutil.rmtree(base, ignore_errors=True)
     os.makedirs(os.path.join(base, "fake")); os.makedirs(os.path.join(base, "work"))
     fake = os.path.join(S, "fake_colab.py")
     env = dict(os.environ, FAKE_DIR=os.path.join(base, "fake"), FAKE_TOKEN_TTL="0.5",
                ORCH_COLAB=fake, ORCH_WORK=os.path.join(base, "work"),
-               ORCH_HELPER=f"{sys.executable} {fake} helper")
+               ORCH_HELPER=shlex.join([sys.executable, fake, "helper"]))
     subprocess.run([fake, "new", "-s", "adattt-p1"], env=env, capture_output=True)
     time.sleep(1)
     subprocess.run([fake, "exec", "-s", "adattt-p1"], env=env, input="print(1)", capture_output=True, text=True)
@@ -179,5 +187,5 @@ def emergency_stop_releases_pruned_orphan():
 
 
 results.append(emergency_stop_releases_pruned_orphan())
-print(f"\n{sum(results)}/{len(results)} scenarios passed")
+print(f"\n{sum(results)}/{len(results)} scenarios passed  (outputs: {ROOT})")
 sys.exit(0 if all(results) else 1)
