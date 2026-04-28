@@ -315,3 +315,4 @@ def main():
 if __name__ == "__main__":
     main()
 # Refactor analyze_results script for clarity
+# Fix figure transition outcome bar chart axis
