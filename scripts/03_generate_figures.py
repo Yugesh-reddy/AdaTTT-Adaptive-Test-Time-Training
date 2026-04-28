@@ -926,3 +926,4 @@ def main():
 if __name__ == "__main__":
     main()
 # Polish figure generation color palette
+# Tune figure narrative arc and labels
