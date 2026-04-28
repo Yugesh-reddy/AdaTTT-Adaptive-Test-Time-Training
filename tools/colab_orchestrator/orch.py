@@ -631,29 +631,48 @@ def relay(st, run, info):
             save_state(st)
 
 
+def relay_with_refresh(st, remote, local, tag):
+    """relay_file, refreshing (or re-adopting) the session and retrying once on failure.
+
+    finalize can outlive a runtime token, and once the VM is stopped a relay
+    that failed cannot be redone.
+    """
+    sha = relay_file(remote, local, tag)
+    if sha is None:
+        state = keep_token_fresh(st)
+        log(f"  relay {tag} failed; session {state}, retrying once")
+        sha = relay_file(remote, local, tag)
+    return sha
+
+
 def finalize(st, probe):
     """Both runs complete: land best + final checkpoints and logs in the project.
 
     Returns (summary, missing). The caller stops the VM only when nothing is
-    missing — once it is stopped, anything not yet relayed is gone.
+    missing — once it is stopped, anything not yet relayed is gone. A file that
+    never arrived is reported as missing, never raised: a crash here would leave
+    the VM billing with no rescue path.
     """
     summary, missing = {}, []
     for run, info in RUNS.items():
         d = os.path.join(WORK, run)
+        keep_token_fresh(st)
         relay(st, run, probe.get(run, {}))
         vals = epoch_vals(probe.get(run, {}))
         final = f"epoch_{max(vals) - 1}.pt"
         best = f"epoch_{best_epoch(vals) - 1}.pt"
         for need in {final, best}:
             if not os.path.exists(os.path.join(d, need)):
-                relay_file(f"{info['vm_ckpt']}/{need}", os.path.join(d, need), f"{run}_{need[:-3]}")
+                relay_with_refresh(st, f"{info['vm_ckpt']}/{need}", os.path.join(d, need),
+                                   f"{run}_{need[:-3]}")
         rc, out = vm_exec(SHA.format(paths=[f"{info['vm_ckpt']}/best.pt"]), 300)
         vm_best = json.loads(marker(out, "SHA_JSON") or "{}").get(f"{info['vm_ckpt']}/best.pt")
         best_local = os.path.join(d, best)
         if vm_best and os.path.exists(best_local) and sha256_file(best_local) != vm_best:
             log(f"  {run}: best.pt differs from {best} byte-wise — relaying best.pt itself")
-            relay_file(f"{info['vm_ckpt']}/best.pt", os.path.join(d, "best.pt"), f"{run}_best")
-        else:
+            relay_with_refresh(st, f"{info['vm_ckpt']}/best.pt", os.path.join(d, "best.pt"),
+                               f"{run}_best")
+        elif os.path.exists(best_local):
             shutil.copyfile(best_local, os.path.join(d, "best.pt"))
         os.makedirs(info["out_ckpt"], exist_ok=True)
         for f in ("best.pt", final):
