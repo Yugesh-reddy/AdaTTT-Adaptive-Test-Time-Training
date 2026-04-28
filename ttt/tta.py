@@ -1,8 +1,21 @@
 """
-Phase 2 test-time adapters: TENT, MEMO, EATA, SAR.
+Phase 2 test-time adapters: MEMO plus episodic TENT-, EATA- and SAR-style variants.
 
 Main method: fusion-LayerNorm-only + MEMO marginal entropy H(mean(p_aug4)),
 K=1, SAR reliability filter, per-sample restore.
+
+Every method here is episodic: parameters are restored after each sample and a
+fresh optimizer takes K steps. Published TENT, EATA and SAR adapt online across
+the test stream (EATA adds a Fisher anti-forgetting penalty; SAR a
+sharpness-aware step and model recovery). "tent", "eata" and "sar" here mean a
+TENT-style entropy loss, an EATA-style sample filter and SAR's entropy filter,
+not those algorithms.
+
+Step size: Adam's first step moves every selected value by ~lr, whatever the
+gradient's scale. With a fresh optimizer per sample and K=1, lr is the whole
+update. At 1e-4 over the 15,360 fusion LayerNorm values, MEMO changed ~0.5% of
+answers on clean, blurred and noised images alike (results/phase2) — too small
+a move to show a TTA effect in either direction.
 
 CLIP-LN (vision-tower LayerNorms) is skipped: it invalidates the 5-view
 vision cache and needs on-the-fly encodes at ~4× cost.
