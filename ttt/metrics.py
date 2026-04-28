@@ -261,3 +261,4 @@ def mcnemar_test(
         "significant_at_005": p_value < 0.05,
     }
 # Fix metrics computation for VizWiz answers
+# Fix figure confidence scatter annotation offsets
