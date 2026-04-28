@@ -829,3 +829,4 @@ def download_memotion2(data_dir: str) -> None:
 # Add VQA-v2 open-ended question validation
 # Implement cached features dataset loader
 # Integrate feature shards into data module
+# Align Memotion2 JSON keys with new data schema
