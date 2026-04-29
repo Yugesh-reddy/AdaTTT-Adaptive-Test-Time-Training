@@ -22,9 +22,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from ttt.phase2_session import (
     GATE_SUBSET as _GATE_SUBSET,
+    active_conditions,
     artifacts_for,
+    eval_artifacts_for,
+    lr_tag,
     needs_tau_fit,
-    session_c_conditions,
+    select_step,
     tau_fit_source,
 )
 
@@ -127,11 +130,12 @@ def _precompute(precompute_main, cond: dict, cache: str, subset: str) -> None:
         raise SystemExit(rc)
 
 
-def fit_tau_on_gate_train(cond: dict, precompute_main, eval_main) -> str:
+def fit_tau_on_gate_train(cond: dict, precompute_main, eval_main, extra_args=()) -> str:
     """Held-out τ: fit on GATE_SUBSET under the same corruption, return tau.json.
 
     Costs one more cache build plus two methods per gated condition. Reuses a
-    tau.json already on this VM, so a preempted session does not refit.
+    tau.json already on this VM, so a preempted session does not refit, and a
+    gate-train cache a step sweep already built.
     """
     out = tau_fit_dir(cond)
     tau_path = os.path.join(out, "tau.json")
@@ -139,8 +143,9 @@ def fit_tau_on_gate_train(cond: dict, precompute_main, eval_main) -> str:
         print(f"reuse {tau_path}")
         return tau_path
     cache = tau_fit_cache(cond)
-    _progress(stage="tau_fit", step=f"{cond['id']} gate-train precompute", condition=cond["id"])
-    _precompute(precompute_main, cond, cache, GATE_SUBSET)
+    if not os.path.isfile(cache):
+        _progress(stage="tau_fit", step=f"{cond['id']} gate-train precompute", condition=cond["id"])
+        _precompute(precompute_main, cond, cache, GATE_SUBSET)
     rc = eval_main([
         "--features", cache,
         "--checkpoint", CHECKPOINT,
@@ -149,6 +154,7 @@ def fit_tau_on_gate_train(cond: dict, precompute_main, eval_main) -> str:
         "--progress-file", PROGRESS,
         "--methods", "no_adapt", "memo_sar",
         "--fit-tau",
+        *extra_args,
     ])
     if rc:
         raise SystemExit(rc)
@@ -202,11 +208,116 @@ def run_condition(cond: dict, precompute_main, eval_main) -> None:
         raise SystemExit(f"{cond['id']} missing artifacts: {missing}")
 
 
+def sweep_dir(cond: dict, lr: float) -> str:
+    return os.path.join(condition_output(cond), "sweep", lr_tag(lr))
+
+
+def _sweep_row(cond: dict, lr: float) -> dict:
+    """Gate-train skip vs dense MEMO at one lr, read from its summary."""
+    with open(os.path.join(sweep_dir(cond, lr), "summary.json")) as fh:
+        summary = json.load(fh)
+    runs = {r["config"]: r for r in summary["runs"]}
+    base, memo = runs["no_adapt"]["soft"], runs["memo"]["soft"]
+    oracle = (summary.get("oracle") or {}).get("oracle_soft")
+    return {
+        "lr": lr,
+        "skip_soft": base,
+        "memo_soft": memo,
+        "gain_pp": 100.0 * (memo - base),
+        "oracle_gain_pp": None if oracle is None else 100.0 * (oracle - base),
+        "pred_flips": runs["memo"].get("pred_flips_vs_no_adapt"),
+    }
+
+
+def run_step_sweep(cond: dict, precompute_main, eval_main) -> None:
+    """Session D: choose the step size on GATE_SUBSET, then score the eval 8k once.
+
+    decision.json records the pre-registered choice before the eval 8k is
+    touched. If no lr reaches cond["min_gain_pp"] the session stops there.
+    """
+    output = condition_output(cond)
+    os.makedirs(output, exist_ok=True)
+    decision_path = os.path.join(output, "decision.json")
+    gt_cache = tau_fit_cache(cond)
+
+    if os.path.isfile(decision_path):
+        with open(decision_path) as fh:
+            decision = json.load(fh)
+        print(f"reuse {decision_path}: proceed={decision['proceed']}")
+    else:
+        for lr in cond["lrs"]:
+            if os.path.isfile(os.path.join(sweep_dir(cond, lr), "summary.json")):
+                continue
+            if not os.path.isfile(gt_cache):
+                _progress(stage="step_sweep", step=f"{cond['id']} gate-train precompute",
+                          condition=cond["id"])
+                _precompute(precompute_main, cond, gt_cache, GATE_SUBSET)
+            _progress(stage="step_sweep", step=f"{cond['id']} gate-train lr {lr:g}",
+                      condition=cond["id"])
+            rc = eval_main([
+                "--features", gt_cache,
+                "--checkpoint", CHECKPOINT,
+                "--output", sweep_dir(cond, lr),
+                "--source", tau_fit_source(cond),
+                "--progress-file", PROGRESS,
+                "--methods", "no_adapt", "memo",
+                "--lr", str(lr),
+            ])
+            if rc:
+                raise SystemExit(rc)
+        rows = [_sweep_row(cond, lr) for lr in cond["lrs"]]
+        chosen, record = select_step({r["lr"]: r["gain_pp"] for r in rows}, cond["min_gain_pp"])
+        decision = {
+            **record,
+            "chosen_lr": chosen,
+            "sweep": rows,
+            "subset": GATE_SUBSET,
+            "source": tau_fit_source(cond),
+            "eval_subset_touched": chosen is not None,
+        }
+        _write_json(decision_path, decision)
+        print(f"step sweep decision: {json.dumps(decision)}")
+
+    if not decision["proceed"]:
+        delete_cache(gt_cache)
+        print(f"{cond['id']}: no lr reached {cond['min_gain_pp']} pp on gate-train; "
+              "eval 8k not touched")
+        return
+    if os.path.isfile(os.path.join(output, "summary.json")):
+        print(f"skip {cond['id']} eval: summary.json already present")
+        return
+
+    lr_args = ["--lr", str(decision["chosen_lr"])]
+    tau_path = fit_tau_on_gate_train(cond, precompute_main, eval_main, extra_args=lr_args)
+    cache = condition_cache(cond)
+    _progress(stage="precompute", step=f"{cond['id']} eval precompute", condition=cond["id"])
+    _precompute(precompute_main, cond, cache, SUBSET)
+    import torch
+    torch.cuda.empty_cache()
+    _progress(stage="eval", step=f"{cond['id']} eval start", condition=cond["id"])
+    rc = eval_main([
+        "--features", cache,
+        "--checkpoint", CHECKPOINT,
+        "--output", output,
+        "--source", cond["source"],
+        "--progress-file", PROGRESS,
+        "--methods", *cond["methods"],
+        "--tau-file", tau_path,
+        *lr_args,
+    ])
+    if rc:
+        raise SystemExit(rc)
+    delete_cache(cache)
+    missing = [n for n in eval_artifacts_for(cond) if not os.path.isfile(os.path.join(output, n))]
+    if missing:
+        raise SystemExit(f"{cond['id']} missing artifacts: {missing}")
+
+
 def main() -> int:
     os.chdir("/content/AdaTTT")
     os.makedirs(CACHE_DIR, exist_ok=True)
     os.makedirs(RESULT_ROOT, exist_ok=True)
-    conditions = session_c_conditions()
+    conditions = active_conditions()
     done_ids = []
     _progress(stage="preflight", step="preflight", conditions_done=done_ids)
     try:
@@ -238,7 +349,8 @@ def main() -> int:
                 condition=cond["id"],
                 conditions_done=done_ids,
             )
-            run_condition(cond, pre_mod.main, eval_mod.main)
+            runner = run_step_sweep if cond.get("kind") == "step_sweep" else run_condition
+            runner(cond, pre_mod.main, eval_mod.main)
             done_ids.append(cond["id"])
             _progress(
                 stage=cond["id"],

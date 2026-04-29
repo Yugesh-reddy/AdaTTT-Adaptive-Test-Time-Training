@@ -149,7 +149,9 @@ def prepare_vm(st):
     if "READY_OK" not in out:
         orch.log("  could not write launch.ready")
         return "failed"
-    orch.log("  launch armed (session C: identity then noise s5)")
+    session = _phase2_session()
+    orch.log(f"  launch armed (session {session.ACTIVE_SESSION.upper()}: "
+             f"{', '.join(c['id'] for c in session.active_conditions())})")
     return "ok"
 
 
@@ -164,7 +166,7 @@ def _fetch_results(st):
     orch.fetch_small("/content/phase2.log", os.path.join(RESULT_LOCAL, "phase2.log"))
     orch.fetch_small("/content/setup.log", os.path.join(WORK, "setup.log"))
     session = _phase2_session()
-    for cond in session.session_c_conditions():
+    for cond in session.active_conditions():
         remote_dir = f"{RESULT_REMOTE}/{cond['result_name']}"
         local_dir = os.path.join(RESULT_LOCAL, cond["result_name"])
         os.makedirs(local_dir, exist_ok=True)
@@ -190,12 +192,14 @@ def _fetch_results(st):
 def finalize(st, probe):
     landed, missing = _fetch_results(st)
     session = _phase2_session()
+    conditions = session.active_conditions()
     essential = {
-        f"{c['result_name']}/summary.json" for c in session.session_c_conditions()
+        f"{c['result_name']}/{name}" for c in conditions
+        for name in session.essential_artifacts(c)
     }
     summary = {
-        "session": "C",
-        "conditions": [c["id"] for c in session.session_c_conditions()],
+        "session": session.ACTIVE_SESSION.upper(),
+        "conditions": [c["id"] for c in conditions],
         "subset": "data/eval_subset_8k.json",
         "landed": landed,
         "missing": missing,
