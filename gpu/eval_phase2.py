@@ -85,6 +85,10 @@ def resolve_tau_protocol(args: argparse.Namespace, parser: argparse.ArgumentPars
         if rec.get("source") == args.source:
             parser.error(f"{args.tau_file} was fit on source '{args.source}', the data "
                          "being reported. Fit τ on gate_train_subset_8k instead.")
+        if (rec.get("lr") is not None and args.lr is not None
+                and abs(float(rec["lr"]) - args.lr) > 1e-12):
+            parser.error(f"{args.tau_file} was fit at lr {rec['lr']}, not --lr {args.lr}: "
+                         "a threshold fit for one step size does not carry to another.")
         return {
             "protocol": "held_out",
             "tau": float(rec["tau"]),
@@ -93,6 +97,7 @@ def resolve_tau_protocol(args: argparse.Namespace, parser: argparse.ArgumentPars
             "target_method": rec.get("target_method"),
             "fit_gated_metric": rec.get("gated_metric"),
             "fit_adapt_rate": rec.get("adapt_rate"),
+            "lr": rec.get("lr"),
         }
     if args.tau is not None:
         return {"protocol": "fixed", "tau": float(args.tau)}
@@ -130,6 +135,8 @@ def main(argv: List[str] | None = None) -> int:
     parser.add_argument("--source", type=str, default="corruption",
                         help="τ-tuning source tag; VQA-CP is rejected")
     parser.add_argument("--k", type=int, default=1)
+    parser.add_argument("--lr", type=float, default=None,
+                        help="Adam step size for the adapters (default: config ttt_lr)")
     parser.add_argument("--progress-file", type=str, default=None,
                         help="Optional JSON heartbeat (VM probe); never a cache path")
     args = parser.parse_args(argv)
@@ -144,6 +151,7 @@ def main(argv: List[str] | None = None) -> int:
     set_seed(config.get("seed", 42))
     logger = setup_logging("logs")
     backend = config.get("encoder_backend", "clip")
+    lr = float(args.lr if args.lr is not None else config.get("ttt_lr", 1e-4))
     AdaptiveRouter.configure_for_backend(backend)
     device = get_device()
 
@@ -180,6 +188,7 @@ def main(argv: List[str] | None = None) -> int:
             # Only reachable with --fit-tau: resolve_tau_protocol refused the rest.
             tau_info = fit_tau_record(gate_scores, base_soft, memo_sar_soft,
                                       source=args.source, reported_here=True)
+            tau_info["lr"] = lr
             tau = float(tau_info["tau"])
             logger.warning("τ=%.4f tuned on the reported outcomes (%s): gated numbers "
                            "are in-sample", tau, args.source)
@@ -188,7 +197,8 @@ def main(argv: List[str] | None = None) -> int:
         if method != "no_adapt":
             tta_method = "memo_sar" if method == "gated_memo_sar" else method
             adapter = TTAAdapter(
-                model, config, method=tta_method, k_steps=args.k, layernorm_only=True
+                model, config, method=tta_method, k_steps=args.k, layernorm_only=True,
+                lr=lr,
             )
 
         def _tick(done: int, total: int, method=method) -> None:
@@ -259,6 +269,7 @@ def main(argv: List[str] | None = None) -> int:
             # so the realized adapt rate can be lower than the pass rate.
             gate_pass = float((out["gate_score"] >= tau).mean())
         runs.append({
+            "lr": None if method == "no_adapt" else lr,
             "pred_flips_vs_no_adapt": flips,
             "gate_pass_rate": gate_pass,
             "config": method,
@@ -281,6 +292,7 @@ def main(argv: List[str] | None = None) -> int:
         # Fit-only run (gate_train_subset_8k): the τ is for a different split.
         tau_info = fit_tau_record(gate_scores, base_soft, memo_sar_soft,
                                   source=args.source, reported_here=False)
+        tau_info["lr"] = lr
         logger.info("Fit τ=%.4f on %s for a held-out eval", tau_info["tau"], args.source)
     if tau_info is not None:
         with open(os.path.join(args.output, "tau.json"), "w") as fh:

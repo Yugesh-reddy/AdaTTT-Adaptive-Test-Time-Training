@@ -235,3 +235,14 @@ def test_in_sample_fit_is_labelled():
                                      np.array([1.0, 1.0]), source="gate_train_x",
                                      reported_here=False)
     assert fit["protocol"] == "fit"
+
+
+def test_tau_fit_at_another_step_size_is_refused(tmp_path):
+    tau = tmp_path / "tau.json"
+    tau.write_text(json.dumps({"tau": 0.4, "source": "gate_train_corruption_gaussian_noise_s5",
+                               "lr": 0.01}))
+    with pytest.raises(SystemExit) as err:
+        eval_phase2.main(_argv("--methods", "no_adapt", "gated_memo_sar",
+                               "--source", "corruption_gaussian_noise_s5",
+                               "--tau-file", str(tau), "--lr", "0.001"))
+    assert err.value.code == 2
