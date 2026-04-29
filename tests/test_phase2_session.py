@@ -35,3 +35,34 @@ def test_noise_s5_artifacts_include_gate_and_oracle():
     assert "oracle.json" in names
     assert "gated_memo_sar.npz" in names
     assert "tent.npz" in names
+
+
+# --- Session D: bigger update step, chosen on gate-train only -----------------
+
+from ttt import phase2_session as ps  # noqa: E402
+
+
+def test_active_session_is_the_step_sweep():
+    (cond,) = ps.active_conditions()
+    assert cond["kind"] == "step_sweep" and cond["corruption"] == "gaussian_noise"
+    assert cond["severity"] == 5 and 1e-4 not in cond["lrs"]
+    assert ps.essential_artifacts(cond) == ["decision.json"]
+
+
+def test_step_sweep_artifacts_cover_sweep_decision_and_eval():
+    (cond,) = ps.session_d_conditions()
+    names = ps.artifacts_for(cond)
+    assert names[0] == "decision.json"
+    assert "sweep/lr_0.01/summary.json" in names and "sweep/lr_0.03/memo.npz" in names
+    assert "tau_fit/tau.json" in names and "gated_memo_sar.npz" in names
+
+
+def test_select_step_ties_go_to_the_smaller_lr():
+    chosen, record = ps.select_step({1e-3: 0.05, 1e-2: 0.30, 3e-2: 0.30}, 0.1)
+    assert chosen == 1e-2 and record["proceed"] is True
+    assert record["gain_pp_by_lr"]["lr_0.01"] == 0.30
+
+
+def test_select_step_stops_below_the_threshold():
+    chosen, record = ps.select_step({1e-3: 0.02, 1e-2: 0.09}, 0.1)
+    assert chosen is None and record["proceed"] is False and record["best_lr"] == 1e-2
