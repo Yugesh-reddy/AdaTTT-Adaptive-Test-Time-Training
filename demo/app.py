@@ -652,3 +652,4 @@ def main():
 if __name__ == "__main__":
     main()
 # Add demo examples routing display
+# Improve Gradio demo card UI layout
