@@ -21,6 +21,8 @@ ROOT = "AdaTTT/"
 EXPLICIT = [
     "config/config.yaml",
     "data/eval_subset_8k.json",
+    # τ and the Session D step size are fit on this subset on the VM.
+    "data/gate_train_subset_8k.json",
     "data/answer_vocab.json",
     "data/v2_Annotations_Val_mscoco.zip",
     "data/v2_Questions_Val_mscoco.zip",
