@@ -192,3 +192,4 @@ class TestEndToEndPipeline:
         # Same input + same seed should give same output (params were restored)
         assert torch.allclose(logits1, logits2, atol=1e-4)
 # Update test_integration with Memotion2 flow
+# Add cross-task evaluation in integration tests
