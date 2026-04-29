@@ -209,3 +209,4 @@ class GracefulPredictor:
             latency_ms=total_ms,
         )
 # Refactor fallback logic for cleaner API
+# Fix fallback NaN confidence handling
