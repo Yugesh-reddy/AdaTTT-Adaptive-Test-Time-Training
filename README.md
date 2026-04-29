@@ -152,3 +152,4 @@ python -m pytest tests/ -v
 - Transformers >= 4.36
 - Gradio >= 4.0 (for demo)
 - Google Colab Pro (H100) for GPU tasks
+# Update README with AdaTTT results summary
