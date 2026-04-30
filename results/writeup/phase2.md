@@ -1,4 +1,4 @@
-# Phase 2: visual TTA shows no gain at the tested step size
+# Phase 2: visual TTA recovers no measurable accuracy
 
 Eval: frozen `data/eval_subset_8k.json` (n = 8000). Episodic, fusion-LayerNorm-only adaptation (15,360 values; Adam, fresh per sample, lr 1e-4, K=1, restored after each sample). Methods: skip, TENT-style, EATA-style (no Fisher term), MEMO (4 AugMix views), MEMO + SAR's entropy filter, gated MEMO + SAR. The published TENT, EATA and SAR adapt online; these are single-step episodic variants.
 
@@ -21,6 +21,19 @@ Identity skip 68.02 on the 8k slice is consistent with CLIP 67.50 on full val.
 - **Noise s5 has something to recover.** Skip falls 6.40 pp, and this operating point recovers none of it. That is a statement about lr 1e-4, K=1, fusion LayerNorms, not about visual TTA in general.
 - **The gate's behaviour is not evidence.** τ saw the outcomes. On noise the gate score (high = uncertain) and SAR's filter (keeps confident samples) pull in opposite directions. τ was tuned against dense MEMO but applied to MEMO + SAR.
 
+## Session D: a bigger step, chosen on gate-train (1.96 h)
+
+Pre-registered sweep on `gate_train_subset_8k` (noise s5) over Adam step sizes 1e-3 / 3e-3 / 1e-2 / 3e-2. The largest gate-train MEMO gain wins, and the run stops if it is under 0.1 pp. 3e-3 won at +0.24 pp. τ was fit on gate-train, and the eval 8k was scored once:
+
+| Method at 3e-3 | vs skip (95% CI) | Adapted | Answers changed | Helped / hurt |
+|---|---:|---:|---:|---:|
+| MEMO | +0.05 (−0.31, +0.45) | 100% | 584 | 174 / 166 |
+| MEMO + SAR filter | +0.01 (−0.36, +0.41) | 93% | 474 | 155 / 155 |
+| gated, held-out τ 0.226 | +0.07 (−0.25, +0.39) | 30% | 373 | 116 / 114 |
+| oracle | +1.72 | — | — | — |
+
+A bigger step makes MEMO move (584 answer changes vs 45 at 1e-4), but its effects cancel. The oracle shows +1.72 pp is there to recover if the helped samples could be picked in advance. The confidence-based gate score barely separates them (AUROC 0.585).
+
 ## Kill
 
-Stop the visual-corruption grid at this operating point. The open question, whether a larger update recovers the noise-s5 drop, needs one run with the step size and τ chosen on `gate_train_subset_8k` and the eval 8k scored once.
+Stop the visual-corruption grid. Neither the original step nor a gate-train-chosen larger one recovers measurable accuracy. What remains is a selection problem: predicting which samples MEMO helps. That is the next experiment.

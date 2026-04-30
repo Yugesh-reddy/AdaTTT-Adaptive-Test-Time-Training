@@ -9,8 +9,12 @@ The per-sample results stay gitignored under `results/`. `numbers.json` is gener
 | Phase 2 per-sample outcomes | `results/phase2/{identity,blur_s3,noise_s5}/<method>.npz` |
 | Phase 2 summaries | `results/phase2/<condition>/summary.json` |
 | τ (in-sample, pre-2026-09-18) | `results/phase2/{blur_s3,noise_s5}/tau.json` |
+| Session D step decision | `results/phase2/noise_s5_step_sweep/decision.json` |
+| Session D gate-train sweep | `results/phase2/noise_s5_step_sweep/sweep/lr_*/summary.json`, `memo.npz` |
+| Session D eval 8k + held-out τ | `results/phase2/noise_s5_step_sweep/{summary.json,tau.json,tau_fit/,*.npz}` |
 | blur s3 orchestrator | `results/phase2/blur_s3/orch_summary.json` |
-| Session C orchestrator (identity + noise s5) | `results/phase2/orch_summary.json` |
+| Session C orchestrator (identity + noise s5) | `results/phase2/orch_summary_c.json` |
+| Session D orchestrator (step sweep) | `results/phase2/orch_summary_d.json` |
 
 The npz `flops_g` fields use the pre-2026-09-18 cost accounting (MEMO4 billed 138.6G); `writeup_numbers.py` recomputes FLOPs from each sample's `adapted` flag.
 
