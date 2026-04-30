@@ -28,6 +28,7 @@ sys.path.insert(0, ROOT)
 
 from ttt.gate import AdaptiveRouter  # noqa: E402
 from ttt.models import FullVQAModel  # noqa: E402
+from ttt.score_gate import binary_auroc  # noqa: E402
 from ttt.utils import load_config  # noqa: E402
 
 PHASE1 = os.path.join(ROOT, "results", "phase1")
@@ -70,6 +71,16 @@ def mcnemar_exact_p(b: int, c: int) -> float:
         return 1.0
     tail = sum(math.comb(n, k) for k in range(min(b, c) + 1)) / 2.0 ** n
     return min(1.0, 2.0 * tail)
+
+
+def paired_bootstrap_ci_pp(delta: np.ndarray, n_boot: int = 2000, seed: int = 0) -> list:
+    """95% CI of mean(delta) in pp, resampling samples (deltas are paired per sample)."""
+    rng = np.random.default_rng(seed)
+    n = len(delta)
+    means = np.concatenate([
+        delta[rng.integers(0, n, size=(200, n))].mean(axis=1) for _ in range(n_boot // 200)
+    ])
+    return [round(100.0 * float(np.percentile(means, q)), 3) for q in (2.5, 97.5)]
 
 
 def corrected_flops(method: str, adapted: np.ndarray) -> np.ndarray:
@@ -131,6 +142,7 @@ def condition_numbers(cond: str, id_skip_soft: float | None) -> dict:
             "soft": _pct(soft.mean()),
             "exact": _pct(ok.mean()),
             "delta_soft_pp": _pct(delta),
+            "delta_soft_ci95_pp": paired_bootstrap_ci_pp(soft - b_soft),
             "adapt_rate": round(p, 4),
             "delta_over_p_pp": _pct(delta / p) if p > 0 else None,
             "avg_gflops": round(float(flops.mean()), 2),
@@ -171,10 +183,71 @@ def condition_numbers(cond: str, id_skip_soft: float | None) -> dict:
             "protocol": t.get("protocol", "in_sample"),
             "tuned_on": t.get("tuned_on", t.get("source")),
             "tuned_against": t.get("target_method", "memo"),
+            "lr": t.get("lr"),
             "gate_pass_rate": round(float((base["gate_score"].astype(float) >= tau).mean()), 4),
             "adapt_rate": methods["gated_memo_sar"]["adapt_rate"],
         }
     return out
+
+
+def benefit_signal(cond: str) -> dict:
+    """Can the gate score tell the samples MEMO helps from the ones it hurts?
+
+    The quartile split is computed on the reported eval set after the fact: a
+    hypothesis for a pre-registered gate, not a result.
+    """
+    d = os.path.join(PHASE2, cond)
+    base, memo = np.load(os.path.join(d, "no_adapt.npz")), np.load(os.path.join(d, "memo.npz"))
+    b_soft, m_soft = base["soft_score"].astype(float), memo["soft_score"].astype(float)
+    score = base["gate_score"].astype(float)
+    helped, hurt = m_soft > b_soft + 1e-6, m_soft < b_soft - 1e-6
+    changed = helped | hurt
+    edges = np.quantile(score, [0.25, 0.5, 0.75])
+    bins = np.digitize(score, edges)
+    quartiles = []
+    for k in range(4):
+        sel = bins == k
+        quartiles.append({
+            "quartile": k + 1,
+            "helped": int((helped & sel).sum()),
+            "hurt": int((hurt & sel).sum()),
+            "net_pp": round(100.0 * float((m_soft[sel] - b_soft[sel]).sum()) / len(b_soft), 3),
+        })
+    return {
+        "helped": int(helped.sum()),
+        "hurt": int(hurt.sum()),
+        "gate_score_auroc_helped_vs_hurt": round(binary_auroc(helped[changed], score[changed]), 3),
+        "by_gate_score_quartile_post_hoc": quartiles,
+        "note": "quartiles are low = confident; computed on the eval set after the fact",
+    }
+
+
+def session_d_numbers(id_skip_soft: float) -> dict | None:
+    """Session D: step size chosen on gate_train_subset_8k, eval 8k scored once."""
+    cond = "noise_s5_step_sweep"
+    d = os.path.join(PHASE2, cond)
+    if not os.path.isdir(d):
+        return None
+    dec = _load(os.path.join(d, "decision.json"))
+    sweep = [{
+        "lr": r["lr"],
+        "skip_soft": _pct(r["skip_soft"]),
+        "memo_soft": _pct(r["memo_soft"]),
+        "gain_pp": round(r["gain_pp"], 3),
+        "oracle_gain_pp": None if r["oracle_gain_pp"] is None else round(r["oracle_gain_pp"], 3),
+        "pred_flips": r["pred_flips"],
+    } for r in dec["sweep"]]
+    return {
+        "question": "does a bigger update step recover the noise-s5 drop?",
+        "rule": dec["rule"],
+        "min_gain_pp": dec["min_gain_pp"],
+        "chosen_lr": dec["chosen_lr"],
+        "sweep_subset": dec["subset"],
+        "sweep_gate_train": sweep,
+        "eval_8k": condition_numbers(cond, id_skip_soft),
+        "benefit_signal": benefit_signal(cond),
+        "hours": _load(os.path.join(PHASE2, "orch_summary_d.json"))["vm_hours"],
+    }
 
 
 def main() -> int:
@@ -218,9 +291,11 @@ def main() -> int:
         },
         "phase1": phase1_numbers(ceiling),
         "eval_8k": eval_8k,
+        "session_d": session_d_numbers(id_skip),
         "priced_hours": {
             "blur_s3": _load(os.path.join(PHASE2, "blur_s3", "orch_summary.json"))["vm_hours"],
-            "session_c_identity_and_noise_s5": _load(os.path.join(PHASE2, "orch_summary.json"))["vm_hours"],
+            "session_c_identity_and_noise_s5": _load(os.path.join(PHASE2, "orch_summary_c.json"))["vm_hours"],
+            "session_d_step_sweep": _load(os.path.join(PHASE2, "orch_summary_d.json"))["vm_hours"],
         },
     }
     with open(OUT, "w") as fh:

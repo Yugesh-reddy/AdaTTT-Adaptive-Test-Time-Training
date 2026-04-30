@@ -59,6 +59,10 @@
           "soft": 68.024,
           "exact": 57.663,
           "delta_soft_pp": 0.0,
+          "delta_soft_ci95_pp": [
+            0.0,
+            0.0
+          ],
           "adapt_rate": 0.0,
           "delta_over_p_pp": null,
           "avg_gflops": 24.81,
@@ -77,6 +81,10 @@
           "soft": 68.024,
           "exact": 57.637,
           "delta_soft_pp": -0.0,
+          "delta_soft_ci95_pp": [
+            -0.092,
+            0.096
+          ],
           "adapt_rate": 1.0,
           "delta_over_p_pp": -0.0,
           "avg_gflops": 175.82,
@@ -107,6 +115,10 @@
           "soft": 66.032,
           "exact": 55.763,
           "delta_soft_pp": 0.0,
+          "delta_soft_ci95_pp": [
+            0.0,
+            0.0
+          ],
           "adapt_rate": 0.0,
           "delta_over_p_pp": null,
           "avg_gflops": 24.81,
@@ -125,6 +137,10 @@
           "soft": 65.99,
           "exact": 55.725,
           "delta_soft_pp": -0.042,
+          "delta_soft_ci95_pp": [
+            -0.104,
+            0.017
+          ],
           "adapt_rate": 1.0,
           "delta_over_p_pp": -0.042,
           "avg_gflops": 43.41,
@@ -143,6 +159,10 @@
           "soft": 65.99,
           "exact": 55.725,
           "delta_soft_pp": -0.042,
+          "delta_soft_ci95_pp": [
+            -0.104,
+            0.017
+          ],
           "adapt_rate": 0.859,
           "delta_over_p_pp": -0.049,
           "avg_gflops": 40.79,
@@ -161,6 +181,10 @@
           "soft": 65.999,
           "exact": 55.737,
           "delta_soft_pp": -0.033,
+          "delta_soft_ci95_pp": [
+            -0.15,
+            0.075
+          ],
           "adapt_rate": 1.0,
           "delta_over_p_pp": -0.033,
           "avg_gflops": 175.82,
@@ -179,6 +203,10 @@
           "soft": 65.999,
           "exact": 55.737,
           "delta_soft_pp": -0.033,
+          "delta_soft_ci95_pp": [
+            -0.15,
+            0.075
+          ],
           "adapt_rate": 0.9321,
           "delta_over_p_pp": -0.036,
           "avg_gflops": 165.57,
@@ -197,6 +225,10 @@
           "soft": 66.032,
           "exact": 55.763,
           "delta_soft_pp": 0.0,
+          "delta_soft_ci95_pp": [
+            0.0,
+            0.0
+          ],
           "adapt_rate": 0.0,
           "delta_over_p_pp": null,
           "avg_gflops": 24.81,
@@ -220,6 +252,7 @@
         "protocol": "in_sample",
         "tuned_on": "corruption_gaussian_blur_s3",
         "tuned_against": "memo",
+        "lr": null,
         "gate_pass_rate": 0.0,
         "adapt_rate": 0.0
       }
@@ -235,6 +268,10 @@
           "soft": 61.624,
           "exact": 51.15,
           "delta_soft_pp": 0.0,
+          "delta_soft_ci95_pp": [
+            0.0,
+            0.0
+          ],
           "adapt_rate": 0.0,
           "delta_over_p_pp": null,
           "avg_gflops": 24.81,
@@ -253,6 +290,10 @@
           "soft": 61.661,
           "exact": 51.2,
           "delta_soft_pp": 0.038,
+          "delta_soft_ci95_pp": [
+            -0.021,
+            0.1
+          ],
           "adapt_rate": 1.0,
           "delta_over_p_pp": 0.038,
           "avg_gflops": 43.41,
@@ -271,6 +312,10 @@
           "soft": 61.657,
           "exact": 51.2,
           "delta_soft_pp": 0.033,
+          "delta_soft_ci95_pp": [
+            -0.021,
+            0.096
+          ],
           "adapt_rate": 0.8496,
           "delta_over_p_pp": 0.039,
           "avg_gflops": 40.61,
@@ -289,6 +334,10 @@
           "soft": 61.582,
           "exact": 51.125,
           "delta_soft_pp": -0.042,
+          "delta_soft_ci95_pp": [
+            -0.138,
+            0.058
+          ],
           "adapt_rate": 1.0,
           "delta_over_p_pp": -0.042,
           "avg_gflops": 175.82,
@@ -307,6 +356,10 @@
           "soft": 61.578,
           "exact": 51.125,
           "delta_soft_pp": -0.046,
+          "delta_soft_ci95_pp": [
+            -0.142,
+            0.054
+          ],
           "adapt_rate": 0.9273,
           "delta_over_p_pp": -0.049,
           "avg_gflops": 164.83,
@@ -325,6 +378,10 @@
           "soft": 61.661,
           "exact": 51.2,
           "delta_soft_pp": 0.038,
+          "delta_soft_ci95_pp": [
+            -0.004,
+            0.088
+          ],
           "adapt_rate": 0.1727,
           "delta_over_p_pp": 0.217,
           "avg_gflops": 50.89,
@@ -348,13 +405,198 @@
         "protocol": "in_sample",
         "tuned_on": "corruption_gaussian_noise_s5",
         "tuned_against": "memo",
+        "lr": null,
         "gate_pass_rate": 0.2455,
         "adapt_rate": 0.1727
       }
     }
   },
+  "session_d": {
+    "question": "does a bigger update step recover the noise-s5 drop?",
+    "rule": "argmax gate-train dense-MEMO gain, ties to the smaller lr; proceed only if the gain is >= 0.1 pp",
+    "min_gain_pp": 0.1,
+    "chosen_lr": 0.003,
+    "sweep_subset": "data/gate_train_subset_8k.json",
+    "sweep_gate_train": [
+      {
+        "lr": 0.001,
+        "skip_soft": 61.362,
+        "memo_soft": 61.467,
+        "gain_pp": 0.104,
+        "oracle_gain_pp": 0.875,
+        "pred_flips": 277
+      },
+      {
+        "lr": 0.003,
+        "skip_soft": 61.362,
+        "memo_soft": 61.6,
+        "gain_pp": 0.238,
+        "oracle_gain_pp": 1.738,
+        "pred_flips": 542
+      },
+      {
+        "lr": 0.01,
+        "skip_soft": 61.362,
+        "memo_soft": 61.254,
+        "gain_pp": -0.108,
+        "oracle_gain_pp": 2.325,
+        "pred_flips": 871
+      },
+      {
+        "lr": 0.03,
+        "skip_soft": 61.362,
+        "memo_soft": 60.742,
+        "gain_pp": -0.621,
+        "oracle_gain_pp": 2.754,
+        "pred_flips": 1123
+      }
+    ],
+    "eval_8k": {
+      "n": 8000,
+      "skip_soft": 61.624,
+      "skip_exact": 51.15,
+      "drop_vs_id_pp": -6.4,
+      "methods": {
+        "no_adapt": {
+          "label": "skip",
+          "soft": 61.624,
+          "exact": 51.15,
+          "delta_soft_pp": 0.0,
+          "delta_soft_ci95_pp": [
+            0.0,
+            0.0
+          ],
+          "adapt_rate": 0.0,
+          "delta_over_p_pp": null,
+          "avg_gflops": 24.81,
+          "p50_gflops": 24.81,
+          "p95_gflops": 24.81,
+          "landed_avg_gflops_old_accounting": 24.81,
+          "pred_flips_vs_skip": 0,
+          "soft_better": 0,
+          "soft_worse": 0,
+          "mcnemar_skip_right_method_wrong": 0,
+          "mcnemar_skip_wrong_method_right": 0,
+          "mcnemar_exact_p": 1.0
+        },
+        "memo": {
+          "label": "MEMO, 4 views",
+          "soft": 61.674,
+          "exact": 51.213,
+          "delta_soft_pp": 0.05,
+          "delta_soft_ci95_pp": [
+            -0.308,
+            0.446
+          ],
+          "adapt_rate": 1.0,
+          "delta_over_p_pp": 0.05,
+          "avg_gflops": 175.82,
+          "p50_gflops": 175.82,
+          "p95_gflops": 175.82,
+          "landed_avg_gflops_old_accounting": 175.88,
+          "pred_flips_vs_skip": 584,
+          "soft_better": 174,
+          "soft_worse": 166,
+          "mcnemar_skip_right_method_wrong": 155,
+          "mcnemar_skip_wrong_method_right": 160,
+          "mcnemar_exact_p": 0.8217
+        },
+        "memo_sar": {
+          "label": "MEMO + SAR entropy filter",
+          "soft": 61.632,
+          "exact": 51.2,
+          "delta_soft_pp": 0.008,
+          "delta_soft_ci95_pp": [
+            -0.358,
+            0.408
+          ],
+          "adapt_rate": 0.9273,
+          "delta_over_p_pp": 0.009,
+          "avg_gflops": 164.83,
+          "p50_gflops": 175.82,
+          "p95_gflops": 175.82,
+          "landed_avg_gflops_old_accounting": 164.89,
+          "pred_flips_vs_skip": 474,
+          "soft_better": 155,
+          "soft_worse": 155,
+          "mcnemar_skip_right_method_wrong": 148,
+          "mcnemar_skip_wrong_method_right": 152,
+          "mcnemar_exact_p": 0.8625
+        },
+        "gated_memo_sar": {
+          "label": "gated MEMO + SAR filter",
+          "soft": 61.694,
+          "exact": 51.188,
+          "delta_soft_pp": 0.071,
+          "delta_soft_ci95_pp": [
+            -0.246,
+            0.392
+          ],
+          "adapt_rate": 0.3033,
+          "delta_over_p_pp": 0.234,
+          "avg_gflops": 70.6,
+          "p50_gflops": 24.81,
+          "p95_gflops": 175.82,
+          "landed_avg_gflops_old_accounting": 70.62,
+          "pred_flips_vs_skip": 373,
+          "soft_better": 116,
+          "soft_worse": 114,
+          "mcnemar_skip_right_method_wrong": 100,
+          "mcnemar_skip_wrong_method_right": 103,
+          "mcnemar_exact_p": 0.8884
+        }
+      },
+      "oracle_soft": 63.34,
+      "oracle_delta_pp": 1.717,
+      "maxprob_auroc": 0.795,
+      "maxprob_aurc": 0.269,
+      "gate": {
+        "tau": 0.2265,
+        "protocol": "held_out",
+        "tuned_on": "gate_train_corruption_gaussian_noise_s5",
+        "tuned_against": "memo_sar",
+        "lr": 0.003,
+        "gate_pass_rate": 0.376,
+        "adapt_rate": 0.3033
+      }
+    },
+    "benefit_signal": {
+      "helped": 174,
+      "hurt": 166,
+      "gate_score_auroc_helped_vs_hurt": 0.585,
+      "by_gate_score_quartile_post_hoc": [
+        {
+          "quartile": 1,
+          "helped": 0,
+          "hurt": 0,
+          "net_pp": 0.0
+        },
+        {
+          "quartile": 2,
+          "helped": 11,
+          "hurt": 12,
+          "net_pp": -0.017
+        },
+        {
+          "quartile": 3,
+          "helped": 69,
+          "hurt": 95,
+          "net_pp": -0.296
+        },
+        {
+          "quartile": 4,
+          "helped": 94,
+          "hurt": 59,
+          "net_pp": 0.363
+        }
+      ],
+      "note": "quartiles are low = confident; computed on the eval set after the fact"
+    },
+    "hours": 1.96
+  },
   "priced_hours": {
     "blur_s3": 1.05,
-    "session_c_identity_and_noise_s5": 1.65
+    "session_c_identity_and_noise_s5": 1.65,
+    "session_d_step_sweep": 1.96
   }
 }
