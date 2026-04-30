@@ -209,7 +209,9 @@ def finalize(st, probe):
         "allocations": st["allocations"],
     }
     os.makedirs(RESULT_LOCAL, exist_ok=True)
-    json.dump(summary, open(os.path.join(RESULT_LOCAL, "orch_summary.json"), "w"), indent=2)
+    # One file per session: a shared name let Session D overwrite Session C's.
+    json.dump(summary, open(os.path.join(
+        RESULT_LOCAL, f"orch_summary_{session.ACTIVE_SESSION}.json"), "w"), indent=2)
     json.dump(summary, open(os.path.join(WORK, "run_summary.json"), "w"), indent=2)
     still = [m for m in missing if m in essential]
     return summary, still
@@ -336,7 +338,8 @@ def run_loop(st):
             return 4
 
         if info.get("done"):
-            orch.log("SESSION C COMPLETE — landing small artifacts (no cache)")
+            orch.log(f"SESSION {_phase2_session().ACTIVE_SESSION.upper()} COMPLETE — "
+                     "landing small artifacts (no cache)")
             summary, missing = finalize(st, p)
             if missing:
                 orch.log(f"summary.json not landed {missing} — retrying once")
