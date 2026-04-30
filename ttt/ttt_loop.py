@@ -395,3 +395,4 @@ class TTTAdapter:
         alpha = random.uniform(alpha_lo, alpha_hi)
         return alpha * z_current + (1 - alpha) * z_anchor.detach()
 # Fix edge case in TTT loop gradient accumulation
+# Update colab runner with cached features workflow
