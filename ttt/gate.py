@@ -201,3 +201,4 @@ class AdaptiveRouter:
 
         return (total_flops / total) / 1e9  # Convert to GFLOPs
 # Tune confidence threshold in gate module
+# Tighten confidence gate threshold sweep bounds
