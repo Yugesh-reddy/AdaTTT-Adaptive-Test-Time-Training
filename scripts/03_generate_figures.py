@@ -928,3 +928,4 @@ if __name__ == "__main__":
 # Polish figure generation color palette
 # Tune figure narrative arc and labels
 # Regenerate question type delta with updated colors
+# Improve figure report pipeline for publication
