@@ -51,7 +51,8 @@ COND_LABEL = {"identity": "ID (eval 8k)", "blur_s3": "blur s3", "noise_s5": "noi
 
 def _save(fig, name: str) -> None:
     os.makedirs(OUT, exist_ok=True)
-    fig.savefig(os.path.join(OUT, f"{name}.svg"))
+    # No timestamp in the SVG, so regenerating unchanged figures changes no bytes.
+    fig.savefig(os.path.join(OUT, f"{name}.svg"), metadata={"Date": None})
     fig.savefig(os.path.join(OUT, f"{name}.png"))
     plt.close(fig)
 
@@ -202,6 +203,86 @@ def fig_mcnemar(n: dict) -> None:
     _save(fig, "blur_mcnemar")
 
 
+def fig_session_d_sweep(n: dict) -> None:
+    """Session D, gate-train only: gain and ceiling vs step size, and how much MEMO moves."""
+    d = n["session_d"]
+    rows = d["sweep_gate_train"]
+    lrs = [r["lr"] for r in rows]
+    fig, axes = plt.subplots(1, 2, figsize=(9.2, 3.9))
+    ax = axes[0]
+    ax.plot(lrs, [r["gain_pp"] for r in rows], "o-", color=ORANGE, label="dense MEMO − skip")
+    ax.plot(lrs, [r["oracle_gain_pp"] for r in rows], "s--", color=BLUE, label="oracle − skip")
+    ax.axhline(0.0, color=GRAY, linewidth=1)
+    ax.axhline(d["min_gain_pp"], color=RED, linestyle=":", linewidth=1,
+               label=f"proceed threshold {d['min_gain_pp']} pp")
+    ax.axvline(d["chosen_lr"], color=GREEN, linestyle=":", linewidth=1.2,
+               label=f"chosen lr {d['chosen_lr']:g}")
+    ax.set_xscale("log")
+    ax.set_xlabel("Adam step size (lr), K=1")
+    ax.set_ylabel("Soft delta vs skip (pp)")
+    ax.set_title("Gate-train 8k, noise s5")
+    ax.legend(fontsize=7.5, loc="upper left")
+    ax = axes[1]
+    ax.plot(lrs, [r["pred_flips"] for r in rows], "o-", color=ORANGE, label="gate-train 8k")
+    c_flips = n["eval_8k"]["noise_s5"]["methods"]["memo"]["pred_flips_vs_skip"]
+    ax.scatter([n["adapter"]["lr"]], [c_flips], facecolors="none", edgecolors=GRAY, s=70,
+               linewidths=1.5, zorder=3, label=f"lr {n['adapter']['lr']:g}, Session C (eval 8k)")
+    ax.set_xscale("log")
+    ax.set_xlabel("Adam step size (lr), K=1")
+    ax.set_ylabel("MEMO answers changed (of 8000)")
+    ax.set_title("How far MEMO moves the model")
+    ax.legend(fontsize=7.5, loc="upper left")
+    fig.suptitle("Session D: choosing the step size on gate-train only", y=1.03)
+    _save(fig, "session_d_sweep")
+
+
+def fig_session_d_eval(n: dict) -> None:
+    """Session D, eval 8k scored once: gains with CIs, and who MEMO helps by gate score."""
+    d = n["session_d"]
+    e = d["eval_8k"]["methods"]
+    c = n["eval_8k"]["noise_s5"]["methods"]["memo"]
+    lr = d["chosen_lr"]
+    rows = [
+        (f"MEMO\nlr {n['adapter']['lr']:g}", c, GRAY),
+        (f"MEMO\nlr {lr:g}", e["memo"], ORANGE),
+        (f"MEMO+SAR\nlr {lr:g}", e["memo_sar"], RED),
+        (f"gated lr {lr:g}\nheld-out τ", e["gated_memo_sar"], BLUE),
+    ]
+    fig, axes = plt.subplots(1, 2, figsize=(9.6, 4.0))
+    ax = axes[0]
+    for i, (label, r, color) in enumerate(rows):
+        lo, hi = r["delta_soft_ci95_pp"]
+        mid = r["delta_soft_pp"]
+        ax.errorbar([i], [mid], yerr=[[mid - lo], [hi - mid]], fmt="o", color=color,
+                    capsize=5, markersize=7)
+    ax.axhline(0.0, color=GRAY, linewidth=1)
+    ax.axhline(d["eval_8k"]["oracle_delta_pp"], color=BLUE, linestyle="--", linewidth=1)
+    ax.text(len(rows) - 0.5, d["eval_8k"]["oracle_delta_pp"] + 0.05,
+            f"oracle at lr {lr:g}: {d['eval_8k']['oracle_delta_pp']:+.2f}", ha="right",
+            fontsize=8, color=BLUE)
+    ax.set_xticks(range(len(rows)), [r[0] for r in rows], fontsize=8.5)
+    ax.set_ylabel("Soft delta vs skip, 95% CI (pp)")
+    ax.set_title(f"Eval 8k, noise s5 (skip {d['eval_8k']['skip_soft']:.2f}, "
+                 f"{d['eval_8k']['drop_vs_id_pp']:+.2f} vs ID)", fontsize=10)
+    ax = axes[1]
+    q = d["benefit_signal"]["by_gate_score_quartile_post_hoc"]
+    x = list(range(len(q)))
+    w = 0.36
+    ax.bar([i - w / 2 for i in x], [r["helped"] for r in q], width=w, color=GREEN, label="MEMO helped")
+    ax.bar([i + w / 2 for i in x], [r["hurt"] for r in q], width=w, color=RED, label="MEMO hurt")
+    for i, r in enumerate(q):
+        ax.text(i, max(r["helped"], r["hurt"]) + 2, f"{r['net_pp']:+.2f} pp", ha="center", fontsize=8)
+    ax.set_xticks(x, [f"Q{r['quartile']}" for r in q])
+    ax.set_xlabel("Gate-score quartile (Q1 = most confident)")
+    ax.set_ylabel("Samples")
+    ax.set_title(f"Post hoc: who MEMO helps (AUROC "
+                 f"{d['benefit_signal']['gate_score_auroc_helped_vs_hurt']:.3f})", fontsize=10)
+    ax.legend(fontsize=8, loc="upper left")
+    fig.suptitle(f"Session D: MEMO at lr {lr:g} moves {e['memo']['pred_flips_vs_skip']} answers "
+                 "but recovers nothing measurable", y=1.03)
+    _save(fig, "session_d_eval")
+
+
 def main() -> int:
     with open(NUMBERS) as fh:
         n = json.load(fh)
@@ -211,6 +292,9 @@ def main() -> int:
     fig_adapter_movement(n)
     fig_oracle_vs_dense(n)
     fig_mcnemar(n)
+    if n.get("session_d"):
+        fig_session_d_sweep(n)
+        fig_session_d_eval(n)
     print("wrote", OUT)
     return 0
 
