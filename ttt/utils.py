@@ -203,3 +203,4 @@ def count_parameters(model: torch.nn.Module, trainable_only: bool = True) -> int
 # Add precomputed feature pipeline support
 # Update utils with checkpoint saving helpers
 # Add COCO image loader utility
+# Final utils cleanup and logging improvements
