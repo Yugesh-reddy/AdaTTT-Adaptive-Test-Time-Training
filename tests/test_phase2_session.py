@@ -42,8 +42,8 @@ def test_noise_s5_artifacts_include_gate_and_oracle():
 from ttt import phase2_session as ps  # noqa: E402
 
 
-def test_active_session_is_the_step_sweep():
-    (cond,) = ps.active_conditions()
+def test_session_d_is_the_step_sweep():
+    (cond,) = ps.session_d_conditions()
     assert cond["kind"] == "step_sweep" and cond["corruption"] == "gaussian_noise"
     assert cond["severity"] == 5 and 1e-4 not in cond["lrs"]
     assert ps.essential_artifacts(cond) == ["decision.json"]
@@ -66,3 +66,22 @@ def test_select_step_ties_go_to_the_smaller_lr():
 def test_select_step_stops_below_the_threshold():
     chosen, record = ps.select_step({1e-3: 0.02, 1e-2: 0.09}, 0.1)
     assert chosen is None and record["proceed"] is False and record["best_lr"] == 1e-2
+
+
+# --- Session E: per-sample signals for a benefit-predicting gate --------------
+
+
+def test_active_session_logs_signals_at_the_session_d_step():
+    (cond,) = ps.active_conditions()
+    assert cond["kind"] == "signals" and cond["lr"] == 3e-3
+    assert cond["methods"] == ["no_adapt", "memo"]
+    assert cond["parts"] == ["gate_train", "eval_sealed"]
+
+
+def test_session_e_lands_outcomes_and_signals_for_both_parts():
+    (cond,) = ps.session_e_conditions()
+    names = ps.artifacts_for(cond)
+    for part in ("gate_train", "eval_sealed"):
+        for f in ("summary.json", "no_adapt.npz", "memo.npz", "memo_signals.npz"):
+            assert f"{part}/{f}" in names
+    assert "eval_sealed/memo_signals.npz" in ps.essential_artifacts(cond)

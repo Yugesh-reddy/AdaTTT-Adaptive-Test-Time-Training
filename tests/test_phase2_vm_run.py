@@ -173,3 +173,58 @@ def test_step_sweep_resumes_from_its_decision(tmp_path, monkeypatch):
     vm.run_step_sweep(cond, precompute, evaluate)
     assert calls == [("precompute", vm.SUBSET), calls[-1]]
     assert calls[-1][:2] == ("eval", 1e-3)
+
+
+# --- Session E signals run ------------------------------------------------------
+
+from ttt.phase2_session import session_e_conditions  # noqa: E402
+
+
+def _signal_fakes(tmp_path, monkeypatch):
+    cond = session_e_conditions()[0]
+    monkeypatch.setattr(vm, "RESULT_ROOT", str(tmp_path / "results"))
+    monkeypatch.setattr(vm, "CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(vm, "PROGRESS", str(tmp_path / "progress.json"))
+    calls = []
+
+    def precompute(argv):
+        calls.append(("precompute", argv[argv.index("--subset") + 1]))
+        out = argv[argv.index("--output") + 1]
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        open(out, "wb").write(b"cache")
+        return 0
+
+    def evaluate(argv):
+        out = argv[argv.index("--output") + 1]
+        calls.append(("eval", os.path.basename(out), argv[argv.index("--source") + 1],
+                      argv[argv.index("--lr") + 1], "--signals" in argv))
+        os.makedirs(out, exist_ok=True)
+        for f in ("summary.json", "oracle.json", "no_adapt.npz", "memo.npz",
+                  "no_adapt_signals.npz", "memo_signals.npz"):
+            open(os.path.join(out, f), "w").write("{}")
+        return 0
+
+    return cond, calls, precompute, evaluate
+
+
+def test_signals_run_covers_both_parts_with_signals_on(tmp_path, monkeypatch):
+    cond, calls, precompute, evaluate = _signal_fakes(tmp_path, monkeypatch)
+    vm.run_signals(cond, precompute, evaluate)
+    assert calls == [
+        ("precompute", vm.GATE_SUBSET),
+        ("eval", "gate_train", f"gate_train_{cond['source']}", "0.003", True),
+        ("precompute", vm.SUBSET),
+        ("eval", "eval_sealed", cond["source"], "0.003", True),
+    ]
+    assert not os.listdir(tmp_path / "cache") if os.path.isdir(tmp_path / "cache") else True
+
+
+def test_signals_run_resumes_per_part(tmp_path, monkeypatch):
+    cond, calls, precompute, evaluate = _signal_fakes(tmp_path, monkeypatch)
+    done = os.path.join(vm.condition_output(cond), "gate_train")
+    os.makedirs(done)
+    for f in ("summary.json", "oracle.json", "no_adapt.npz", "memo.npz",
+              "no_adapt_signals.npz", "memo_signals.npz"):
+        open(os.path.join(done, f), "w").write("{}")
+    vm.run_signals(cond, precompute, evaluate)
+    assert [c[:2] for c in calls] == [("precompute", vm.SUBSET), ("eval", "eval_sealed")]

@@ -313,6 +313,43 @@ def run_step_sweep(cond: dict, precompute_main, eval_main) -> None:
         raise SystemExit(f"{cond['id']} missing artifacts: {missing}")
 
 
+def run_signals(cond: dict, precompute_main, eval_main) -> None:
+    """Session E: skip and MEMO with per-sample signals on both subsets.
+
+    Nothing is gated or scored here. Each part's cache is built, used and
+    deleted in turn; a part whose summary already landed is skipped on resume.
+    """
+    base = condition_output(cond)
+    stem, ext = os.path.splitext(cond["cache_name"])
+    for part in cond["parts"]:
+        out = os.path.join(base, part)
+        if os.path.isfile(os.path.join(out, "summary.json")):
+            print(f"skip {cond['id']}/{part}: summary.json already present")
+            continue
+        subset = GATE_SUBSET if part == "gate_train" else SUBSET
+        source = tau_fit_source(cond) if part == "gate_train" else cond["source"]
+        cache = os.path.join(CACHE_DIR, f"{stem}_{part}{ext}")
+        _progress(stage="precompute", step=f"{cond['id']} {part} precompute", condition=cond["id"])
+        _precompute(precompute_main, cond, cache, subset)
+        _progress(stage="eval", step=f"{cond['id']} {part} eval", condition=cond["id"])
+        rc = eval_main([
+            "--features", cache,
+            "--checkpoint", CHECKPOINT,
+            "--output", out,
+            "--source", source,
+            "--progress-file", PROGRESS,
+            "--methods", *cond["methods"],
+            "--lr", str(cond["lr"]),
+            "--signals",
+        ])
+        if rc:
+            raise SystemExit(rc)
+        delete_cache(cache)
+    missing = [n for n in artifacts_for(cond) if not os.path.isfile(os.path.join(base, n))]
+    if missing:
+        raise SystemExit(f"{cond['id']} missing artifacts: {missing}")
+
+
 def main() -> int:
     os.chdir("/content/AdaTTT")
     os.makedirs(CACHE_DIR, exist_ok=True)
@@ -349,7 +386,8 @@ def main() -> int:
                 condition=cond["id"],
                 conditions_done=done_ids,
             )
-            runner = run_step_sweep if cond.get("kind") == "step_sweep" else run_condition
+            runner = {"step_sweep": run_step_sweep, "signals": run_signals}.get(
+                cond.get("kind"), run_condition)
             runner(cond, pre_mod.main, eval_mod.main)
             done_ids.append(cond["id"])
             _progress(

@@ -62,7 +62,7 @@ def session_c_conditions() -> List[Dict[str, Any]]:
 # gain is under STEP_SWEEP_MIN_GAIN_PP the session stops and the eval 8k is
 # never touched; otherwise τ is fit on GATE_SUBSET with memo_sar at that lr and
 # the eval 8k is scored once. 1e-4, the Session C step, moved ~0.5% of answers.
-ACTIVE_SESSION = "d"
+ACTIVE_SESSION = "e"
 STEP_SWEEP_LRS: Sequence[float] = (1e-3, 3e-3, 1e-2, 3e-2)
 STEP_SWEEP_MIN_GAIN_PP = 0.1
 
@@ -85,9 +85,39 @@ def session_d_conditions() -> List[Dict[str, Any]]:
     ]
 
 
+# Session E, fixed before the run. Skip and dense MEMO at SESSION_E_LR (Session
+# D's gate-train choice) on both subsets under gaussian noise s5, logging the
+# per-sample signals of ttt.phase2_eval.SIGNAL_TIERS. No gating happens on the
+# VM: MEMO resets per sample, so any gate's outcome is where(gate, MEMO, skip).
+# Gates are fit locally on gate_train only (scripts/phase2_gate_fit.py), and
+# eval_sealed is read only by scripts/phase2_gate_score.py, which requires a
+# committed gate spec.
+SESSION_E_LR = 3e-3
+SIGNAL_PARTS = ("gate_train", "eval_sealed")
+
+
+def session_e_conditions() -> List[Dict[str, Any]]:
+    """Per-sample outcomes and gate signals for a benefit-predicting gate."""
+    return [
+        {
+            "id": "gaussian_noise_s5_signals",
+            "kind": "signals",
+            "corruption": "gaussian_noise",
+            "severity": 5,
+            "lr": SESSION_E_LR,
+            "methods": ["no_adapt", "memo"],
+            "parts": list(SIGNAL_PARTS),
+            "cache_name": "noise_s5.pt",
+            "result_name": "noise_s5_signals",
+            "source": "corruption_gaussian_noise_s5",
+        },
+    ]
+
+
 def active_conditions() -> List[Dict[str, Any]]:
     """The conditions the next VM session runs."""
-    return {"c": session_c_conditions, "d": session_d_conditions}[ACTIVE_SESSION]()
+    return {"c": session_c_conditions, "d": session_d_conditions,
+            "e": session_e_conditions}[ACTIVE_SESSION]()
 
 
 def lr_tag(lr: float) -> str:
@@ -132,11 +162,18 @@ def eval_artifacts_for(condition: Dict[str, Any]) -> List[str]:
 
 def essential_artifacts(condition: Dict[str, Any]) -> List[str]:
     """Files that must land before the VM is stopped."""
+    if condition.get("kind") == "signals":
+        return [f"{part}/{f}" for part in condition["parts"]
+                for f in ("summary.json", "no_adapt.npz", "memo.npz",
+                          "no_adapt_signals.npz", "memo_signals.npz")]
     return ["decision.json"] if condition.get("kind") == "step_sweep" else ["summary.json"]
 
 
 def artifacts_for(condition: Dict[str, Any]) -> List[str]:
     """Compact files to land for one condition. No feature cache."""
+    if condition.get("kind") == "signals":
+        return [*essential_artifacts(condition),
+                *(f"{part}/oracle.json" for part in condition["parts"])]
     names = eval_artifacts_for(condition)
     if condition.get("kind") == "step_sweep":
         sweep = [f"sweep/{lr_tag(lr)}/{f}" for lr in condition["lrs"]
