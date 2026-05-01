@@ -153,3 +153,4 @@ python -m pytest tests/ -v
 - Gradio >= 4.0 (for demo)
 - Google Colab Pro (H100) for GPU tasks
 # Update README with AdaTTT results summary
+# Final README polish and badges
