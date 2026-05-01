@@ -210,3 +210,4 @@ class GracefulPredictor:
         )
 # Refactor fallback logic for cleaner API
 # Fix fallback NaN confidence handling
+# Final fallback module cleanup
