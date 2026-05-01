@@ -34,6 +34,18 @@ Pre-registered sweep on `gate_train_subset_8k` (noise s5) over Adam step sizes 1
 
 A bigger step makes MEMO move (584 answer changes vs 45 at 1e-4), but its effects cancel. The oracle shows +1.72 pp is there to recover if the helped samples could be picked in advance. The confidence-based gate score barely separates them (AUROC 0.585).
 
+## Session E: a benefit gate (1.30 h)
+
+Skip and MEMO at 3e-3 were run on both subsets with per-sample signals. Five gates were cross-validated on gate-train only; the cheapest near-best won (one AugMix view plus the free signals). It was frozen in git and scored once on the sealed eval 8k:
+
+| | vs skip (95% CI) | Adapted | Avg GFLOPs | Helped / hurt |
+|---|---:|---:|---:|---:|
+| dense MEMO | +0.05 (−0.31, +0.45) | 100% | 175.8 | 174 / 166 |
+| benefit gate | +0.18 (−0.11, +0.47) | 14% | 66.7 | 114 / 99 |
+| oracle | +1.72 | — | — | — |
+
+The gate beats dense MEMO at 38% of its compute, but not significantly beyond skip. No signal set, including four-view agreement and post-MEMO signals, predicts helped vs hurt above AUROC 0.57.
+
 ## Kill
 
-Stop the visual-corruption grid. Neither the original step nor a gate-train-chosen larger one recovers measurable accuracy. What remains is a selection problem: predicting which samples MEMO helps. That is the next experiment.
+Stop the visual-corruption grid. Neither the original step, a gate-train-chosen larger one, nor a pre-registered benefit gate recovers measurable accuracy on the noise-s5 drop. The limit is the benefit signal: these per-sample signals predict who MEMO helps only weakly.

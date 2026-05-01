@@ -134,11 +134,48 @@ For comparison, Session C's MEMO at 1e-4: −0.04 (−0.14, +0.06), with 45 answ
 
 ![Session D eval](figures/session_d_eval.svg)
 
+### 2.9 Session E — a gate that predicts who MEMO helps (1.30 h)
+
+**Pre-registered** in `ttt/benefit_gate.py`, committed before scoring:
+- **Runs.** Skip and dense MEMO at lr 3e-3 on both subsets under noise s5.
+- **Signals.** Four per-sample cost tiers: free (confidence, entropy, margin), one AugMix view (+23.8G), four views (+95.2G), and after MEMO (full cost).
+- **Gates.** Five candidates, fit on gate-train only: logistic regressions on helped vs hurt, weighted by the size of the change.
+- **Choice.** 5-fold cross-validation. The best gain wins, a gate within 0.05 pp of it that costs less wins instead, and below 0.2 pp nothing is scored.
+- **Seal.** The eval split stayed unread until the frozen gate spec (`results/writeup/gate_spec_session_e.json`) was committed.
+
+**Gate-train, 5-fold CV** (dense MEMO +0.24, oracle +1.74):
+
+| Gate | CV gain | Adapted | Avg GFLOPs | AUROC helped vs hurt |
+|---|---:|---:|---:|---:|
+| existing gate score | +0.28 | 38% | 81.9 | 0.53 |
+| free signals | +0.34 | 31% | 70.8 | 0.53 |
+| **+ one view (chosen)** | **+0.35** | 17% | 69.6 | 0.57 |
+| + four views | +0.35 | 21% | 131.9 | 0.57 |
+| after MEMO | +0.33 | 15% kept | 175.8 | 0.55 |
+
+**Eval 8k, scored once:**
+
+| | vs skip (95% CI) | Adapted | GFLOPs avg / p50 / p95 | Helped / hurt | McNemar p |
+|---|---:|---:|---:|---:|---:|
+| dense MEMO | +0.05 (−0.31, +0.45) | 100% | 175.8 / 175.8 / 175.8 | 174 / 166 | 0.82 |
+| benefit gate (one view) | +0.18 (−0.11, +0.47) | 14% | 66.7 / 48.6 / 175.8 | 114 / 99 | 0.50 |
+| oracle | +1.72 | — | ≥ 175.8 | — | — |
+
+- **Better than dense MEMO at 38% of its compute,** but not distinguishable from skip: the CI includes zero.
+- **It captures about a tenth of the oracle** (+0.18 of +1.72), and at most 7% of the 6.40 pp drop (the CI's upper bound).
+- **The signals are weak.** No signal set predicts helped vs hurt above AUROC 0.57, including four-view agreement and the post-MEMO signals. That, not the threshold, limits every gate here.
+- **Reproducibility.** Skip (61.624) and dense MEMO (+0.050, 174 / 166) match Session D exactly, and gate-train dense MEMO matches Session D's sweep (+0.24).
+
+![Session E gate](figures/session_e_gate.svg)
+
 ## 3. Decision
 
 - **Phase 1:** keep CLIP.
-- **Phase 2:** no visual-TTA configuration tested recovers measurable accuracy on the noise-s5 drop. At 1e-4 MEMO barely moves. At a gate-train-chosen 3e-3 it changes about 7% of answers, but helps and hurts in equal measure.
-- **Open, and next:** whether a gate that predicts per-sample benefit can capture the +1.72 pp oracle ceiling. The confidence score does not (AUROC 0.585).
+- **Phase 2:** visual TTA does not measurably recover the noise-s5 drop.
+  - At 1e-4, MEMO barely moves.
+  - At a gate-train-chosen 3e-3, it changes about 7% of answers, but helps and hurts equally.
+  - A pre-registered benefit gate improves on dense MEMO (+0.18 vs +0.05 pp, at 66.7 vs 175.8 GFLOPs), but not significantly over skip.
+- **What limits it:** none of the per-sample signals tested predicts MEMO's benefit above AUROC 0.57, so any gate built on them stays far below the +1.72 pp oracle. Progress needs a stronger benefit signal or a different adaptation target, not more tuning of these.
 
 ## 4. Pipeline fixes made after these runs (2026-09-18)
 

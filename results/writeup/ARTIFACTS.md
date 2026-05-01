@@ -15,6 +15,10 @@ The per-sample results stay gitignored under `results/`. `numbers.json` is gener
 | blur s3 orchestrator | `results/phase2/blur_s3/orch_summary.json` |
 | Session C orchestrator (identity + noise s5) | `results/phase2/orch_summary_c.json` |
 | Session D orchestrator (step sweep) | `results/phase2/orch_summary_d.json` |
+| Session E outcomes + gate signals | `results/phase2/noise_s5_signals/{gate_train,eval_sealed}/*.npz` |
+| Session E frozen gate (in git) | `results/writeup/gate_spec_session_e.json` |
+| Session E eval score (in git) | `results/writeup/gate_score_session_e.json` |
+| Session E orchestrator | `results/phase2/orch_summary_e.json` |
 
 The npz `flops_g` fields use the pre-2026-09-18 cost accounting (MEMO4 billed 138.6G); `writeup_numbers.py` recomputes FLOPs from each sample's `adapted` flag.
 
