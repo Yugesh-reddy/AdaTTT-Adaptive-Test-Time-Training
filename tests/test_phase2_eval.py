@@ -246,3 +246,47 @@ def test_tau_fit_at_another_step_size_is_refused(tmp_path):
                                "--source", "corruption_gaussian_noise_s5",
                                "--tau-file", str(tau), "--lr", "0.001"))
     assert err.value.code == 2
+
+
+# --- per-sample gate signals ----------------------------------------------------
+
+from ttt.phase2_eval import SIGNAL_TIERS  # noqa: E402
+
+
+def _signal_names():
+    return [name for tier in SIGNAL_TIERS.values() for name in tier]
+
+
+def test_memo_run_records_every_signal_tier():
+    cfg = _config()
+    model = FullVQAModel(cfg)
+    model.eval()
+    AdaptiveRouter.configure_for_backend("clip")
+    adapter = TTAAdapter(model, cfg, method="memo", k_steps=1, n_aug=4)
+    out = evaluate_condition(model, _samples(), method="memo", adapter=adapter, signals=True)
+    sig = out["signals"]
+    assert sorted(sig) == sorted(_signal_names())
+    assert all(len(v) == 4 for v in sig.values())
+    assert np.all(np.isfinite(sig["post_entropy_drop"]))  # every sample adapted
+    assert set(np.unique(sig["probe_agree"])) <= {0.0, 1.0}
+    assert np.all((sig["views_agree_frac"] >= 0) & (sig["views_agree_frac"] <= 1))
+    assert np.allclose(sig["maxprob"], out["maxprob"])
+
+
+def test_skip_run_leaves_post_signals_empty():
+    cfg = _config()
+    model = FullVQAModel(cfg)
+    model.eval()
+    AdaptiveRouter.configure_for_backend("clip")
+    out = evaluate_condition(model, _samples(), method="no_adapt", signals=True)
+    for name in SIGNAL_TIERS["post"]:
+        assert np.all(np.isnan(out["signals"][name]))
+    assert np.all(np.isfinite(out["signals"]["probe_kl"]))
+
+
+def test_signals_are_off_by_default():
+    cfg = _config()
+    model = FullVQAModel(cfg)
+    model.eval()
+    AdaptiveRouter.configure_for_backend("clip")
+    assert "signals" not in evaluate_condition(model, _samples(), method="no_adapt")

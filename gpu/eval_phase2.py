@@ -137,6 +137,8 @@ def main(argv: List[str] | None = None) -> int:
     parser.add_argument("--k", type=int, default=1)
     parser.add_argument("--lr", type=float, default=None,
                         help="Adam step size for the adapters (default: config ttt_lr)")
+    parser.add_argument("--signals", action="store_true",
+                        help="Also save per-sample gate signals as <method>_signals.npz")
     parser.add_argument("--progress-file", type=str, default=None,
                         help="Optional JSON heartbeat (VM probe); never a cache path")
     args = parser.parse_args(argv)
@@ -230,6 +232,7 @@ def main(argv: List[str] | None = None) -> int:
             weights=weights,
             k_steps=args.k,
             on_progress=_tick,
+            signals=args.signals,
         )
         if method == "no_adapt":
             base_soft = out["soft_score"].copy()
@@ -249,6 +252,9 @@ def main(argv: List[str] | None = None) -> int:
             flops_g=out["flops_g"],
         )
         save_outcomes_npz(os.path.join(args.output, f"{method}.npz"), **packed)
+        if args.signals:
+            save_outcomes_npz(os.path.join(args.output, f"{method}_signals.npz"),
+                              **{k: v.astype(np.float32) for k, v in out["signals"].items()})
 
         exact = float((out["prediction"] == out["ground_truth"]).mean())
         soft = float(out["soft_score"].mean())

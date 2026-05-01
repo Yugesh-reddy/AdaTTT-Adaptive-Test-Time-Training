@@ -23,6 +23,19 @@ from ttt.tta import TTAAdapter
 
 
 ProgressFn = Callable[[int, int], None]
+
+# Per-sample signals for a gate that predicts benefit, grouped by what a
+# deployed gate would pay to see them (see scripts/phase2_gate_fit.py):
+#   free       — from the base forward the request already runs
+#   one view   — original vs AugMix view 1 under the unadapted weights
+#   four views — all four AugMix views under the unadapted weights
+#   post       — after MEMO has run (the full adaptation cost)
+SIGNAL_TIERS = {
+    "free": ("maxprob", "entropy_norm", "margin"),
+    "one_view": ("probe_agree", "probe_kl"),
+    "four_views": ("views_agree_frac", "views_marginal_entropy_norm"),
+    "post": ("post_maxprob", "post_entropy_norm", "post_entropy_drop", "post_answer_changed", "memo_loss"),
+}
 SampleSource = Union[Mapping[str, Any], Sequence[Any]]
 
 
@@ -85,11 +98,14 @@ def evaluate_condition(
     weights: Optional[ScoreWeights] = None,
     k_steps: int = 1,
     on_progress: Optional[ProgressFn] = None,
+    signals: bool = False,
 ) -> Dict[str, np.ndarray]:
     """Run one method, streaming samples (CPU-safe tests, CUDA on the VM).
 
     `samples` is either a batched dict with `visual_tokens` (N, 5, tokens, dim)
     or a Dataset/sequence yielding per-sample dicts. View 0 is the original.
+    With signals=True, out["signals"] holds the SIGNAL_TIERS arrays; post-MEMO
+    signals are NaN where the sample was not adapted.
     """
     weights = weights or ScoreWeights()
     n = _n_samples(samples)
@@ -102,6 +118,8 @@ def evaluate_condition(
     gate_score = np.empty(n, dtype=np.float32)
     flops_g = np.empty(n, dtype=np.float32)
     maxprob = np.empty(n, dtype=np.float32)
+    sig_out = ({name: np.full(n, np.nan, dtype=np.float32)
+                for tier in SIGNAL_TIERS.values() for name in tier} if signals else None)
 
     model.eval()
     for i in range(n):
@@ -132,6 +150,9 @@ def evaluate_condition(
         score = float(weighted_score(sig, weights)[0].item())
         gate_score[i] = score
         maxprob[i] = float(sig["maxprob"][0].item())
+        base_pred = int(base_logits.argmax(dim=-1)[0].item())
+        if signals:
+            _record_pre_signals(sig_out, i, model, sig, base_pred, views, text, mask)
 
         do_adapt = False
         n_aug = 0
@@ -159,6 +180,14 @@ def evaluate_condition(
             n_aug = int(info["n_aug"])
 
         pred = int(logits.argmax(dim=-1)[0].item())
+        if signals and do_adapt:
+            post = signals_from_logits(logits.detach())
+            sig_out["post_maxprob"][i] = float(post["maxprob"][0].item())
+            sig_out["post_entropy_norm"][i] = float(post["entropy_norm"][0].item())
+            sig_out["post_entropy_drop"][i] = (
+                float(sig["entropy_norm"][0].item()) - float(post["entropy_norm"][0].item()))
+            sig_out["post_answer_changed"][i] = float(pred != base_pred)
+            sig_out["memo_loss"][i] = float(info.get("loss", float("nan")))
         preds[i] = pred
         gts[i] = int(sample["answer_idx"])
         scores = sample.get("answer_scores")
@@ -176,7 +205,9 @@ def evaluate_condition(
             on_progress(i + 1, n)
 
     exact_correct = preds == gts
+    extra = {"signals": sig_out} if signals else {}
     return {
+        **extra,
         "prediction": preds,
         "ground_truth": gts,
         "soft_score": soft,
@@ -188,6 +219,28 @@ def evaluate_condition(
         "maxprob_aurc": aurc(maxprob, exact_correct.astype(float)),
         "score_auroc": binary_auroc(~exact_correct.astype(bool), gate_score),
     }
+
+
+@torch.no_grad()
+def _record_pre_signals(out, i, model, sig, base_pred, views, text, mask) -> None:
+    """Free, one-view and four-view signals, all under the unadapted weights."""
+    out["maxprob"][i] = float(sig["maxprob"][0].item())
+    out["entropy_norm"][i] = float(sig["entropy_norm"][0].item())
+    out["margin"][i] = float(sig["margin"][0].item())
+    n_views = views.size(0)
+    if n_views == 0:
+        return
+    z = model.fusion(views, text.expand(n_views, -1, -1), mask.expand(n_views, -1))
+    view_probs = torch.softmax(model.prediction_head(z), dim=-1)
+    base_probs = sig["probs"][0]
+    agree = view_probs.argmax(dim=-1) == base_pred
+    out["probe_agree"][i] = float(agree[0].item())
+    p, q = base_probs.clamp_min(1e-8), view_probs[0].clamp_min(1e-8)
+    out["probe_kl"][i] = float((p * (p.log() - q.log())).sum().item())
+    out["views_agree_frac"][i] = float(agree.float().mean().item())
+    marginal = view_probs.mean(dim=0).clamp_min(1e-8)
+    out["views_marginal_entropy_norm"][i] = float(
+        -(marginal * marginal.log()).sum().item() / np.log(view_probs.size(-1)))
 
 
 def merge_condition_outputs(
