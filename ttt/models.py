@@ -574,3 +574,4 @@ class FullVQAModel(nn.Module):
         return params
 # Optimize model forward pass memory usage
 # Update adaptive router for feature-based prediction
+# Final models cleanup and type hints
