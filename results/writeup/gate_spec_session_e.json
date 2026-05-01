@@ -1,0 +1,99 @@
+{
+  "session": "E",
+  "fit_on": "results/phase2/noise_s5_signals/gate_train",
+  "inputs_sha256": {
+    "no_adapt.npz": "c09997a239ee8750c5b6b20de22a0ae711695ec358893a46a137b90acb9ae040",
+    "memo.npz": "3ba4ead5ac8dfd00cb9232a34b82dba3ba1a95c434b77d6ed56f9eee7b5f4a46",
+    "memo_signals.npz": "7aed50445b97f1f64ab638b7465b4339cc247b32969c99f37faefae44b2b1dc4"
+  },
+  "gate_train": {
+    "n": 8000,
+    "skip_soft": 61.361,
+    "memo_gain_pp": 0.237,
+    "oracle_gain_pp": 1.737,
+    "helped": 177,
+    "hurt": 166
+  },
+  "settings": {
+    "l2": 0.1,
+    "folds": 5,
+    "seed": 0,
+    "tie_pp": 0.05,
+    "min_gain_pp": 0.2
+  },
+  "cv": {
+    "score": {
+      "gain_pp": 0.275,
+      "adapt_rate": 0.3779,
+      "avg_gflops": 81.87,
+      "auroc_helped_vs_hurt": 0.527
+    },
+    "free": {
+      "gain_pp": 0.342,
+      "adapt_rate": 0.3046,
+      "avg_gflops": 70.81,
+      "auroc_helped_vs_hurt": 0.527
+    },
+    "one_view": {
+      "gain_pp": 0.346,
+      "adapt_rate": 0.1653,
+      "avg_gflops": 69.64,
+      "auroc_helped_vs_hurt": 0.568
+    },
+    "four_views": {
+      "gain_pp": 0.35,
+      "adapt_rate": 0.2131,
+      "avg_gflops": 131.93,
+      "auroc_helped_vs_hurt": 0.566
+    },
+    "post": {
+      "gain_pp": 0.325,
+      "adapt_rate": 0.1539,
+      "avg_gflops": 175.82,
+      "auroc_helped_vs_hurt": 0.548
+    }
+  },
+  "selection": {
+    "rule": "best cross-validated gate_train gain; a gate within 0.05 pp of it that costs less wins; stop if the best gain is under 0.2 pp",
+    "best_gain_pp": 0.35,
+    "candidate": "one_view",
+    "proceed": true
+  },
+  "proceed": true,
+  "gate": {
+    "name": "one_view",
+    "features": [
+      "maxprob",
+      "entropy_norm",
+      "margin",
+      "probe_agree",
+      "probe_kl"
+    ],
+    "model": {
+      "mean": [
+        0.461042670592796,
+        0.1891345783210096,
+        0.1766257023889539,
+        0.4314868804664723,
+        0.636976330266281
+      ],
+      "std": [
+        0.21292977156146803,
+        0.12461189057008465,
+        0.21594719711517663,
+        0.49528370905147384,
+        1.2677390177532966
+      ],
+      "coef": [
+        -0.03304883533335432,
+        -0.0474723252837922,
+        -0.18011858484834137,
+        -0.14844171991989957,
+        -0.10984985315487539
+      ],
+      "intercept": 0.16675805838817434
+    },
+    "threshold": 0.12410474029294821,
+    "probe_views": 1
+  }
+}
