@@ -263,3 +263,4 @@ def mcnemar_test(
 # Fix metrics computation for VizWiz answers
 # Fix figure confidence scatter annotation offsets
 # Update analysis summary with final numbers
+# Final metrics module cleanup
