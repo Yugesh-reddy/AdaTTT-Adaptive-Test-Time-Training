@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import math
 import os
 import sys
 
@@ -28,6 +27,7 @@ sys.path.insert(0, ROOT)
 
 from ttt.gate import AdaptiveRouter  # noqa: E402
 from ttt.models import FullVQAModel  # noqa: E402
+from ttt.phase2_report import mcnemar_exact_p, paired_bootstrap_ci_pp  # noqa: E402,F401
 from ttt.score_gate import binary_auroc  # noqa: E402
 from ttt.utils import load_config  # noqa: E402
 
@@ -62,25 +62,6 @@ def _load(path):
 
 def _pct(x: float) -> float:
     return round(100.0 * float(x), 3)
-
-
-def mcnemar_exact_p(b: int, c: int) -> float:
-    """Two-sided exact McNemar (binomial on the discordant pairs)."""
-    n = b + c
-    if n == 0:
-        return 1.0
-    tail = sum(math.comb(n, k) for k in range(min(b, c) + 1)) / 2.0 ** n
-    return min(1.0, 2.0 * tail)
-
-
-def paired_bootstrap_ci_pp(delta: np.ndarray, n_boot: int = 2000, seed: int = 0) -> list:
-    """95% CI of mean(delta) in pp, resampling samples (deltas are paired per sample)."""
-    rng = np.random.default_rng(seed)
-    n = len(delta)
-    means = np.concatenate([
-        delta[rng.integers(0, n, size=(200, n))].mean(axis=1) for _ in range(n_boot // 200)
-    ])
-    return [round(100.0 * float(np.percentile(means, q)), 3) for q in (2.5, 97.5)]
 
 
 def corrected_flops(method: str, adapted: np.ndarray) -> np.ndarray:

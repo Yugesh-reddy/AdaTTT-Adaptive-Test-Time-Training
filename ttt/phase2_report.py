@@ -9,6 +9,7 @@ the gap is visible.
 from __future__ import annotations
 
 import json
+import math
 import os
 from typing import Any, Dict, List, Optional
 
@@ -47,6 +48,25 @@ def sample_flops_ladder(backend: str = "clip") -> Dict[str, Any]:
             "layernorm_only is Δ=0 FLOPs by design (optimizer state, not compute)."
         ),
     }
+
+
+def mcnemar_exact_p(b: int, c: int) -> float:
+    """Two-sided exact McNemar (binomial on the discordant pairs)."""
+    n = b + c
+    if n == 0:
+        return 1.0
+    tail = sum(math.comb(n, k) for k in range(min(b, c) + 1)) / 2.0 ** n
+    return min(1.0, 2.0 * tail)
+
+
+def paired_bootstrap_ci_pp(delta: np.ndarray, n_boot: int = 2000, seed: int = 0) -> list:
+    """95% CI of mean(delta) in pp, resampling samples (deltas are paired per sample)."""
+    rng = np.random.default_rng(seed)
+    n = len(delta)
+    means = np.concatenate([
+        delta[rng.integers(0, n, size=(200, n))].mean(axis=1) for _ in range(n_boot // 200)
+    ])
+    return [round(100.0 * float(np.percentile(means, q)), 3) for q in (2.5, 97.5)]
 
 
 def oracle_recovery(base_soft: np.ndarray, adapted_soft: np.ndarray) -> Dict[str, float]:
