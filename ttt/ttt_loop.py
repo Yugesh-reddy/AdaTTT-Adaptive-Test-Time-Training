@@ -396,3 +396,4 @@ class TTTAdapter:
         return alpha * z_current + (1 - alpha) * z_anchor.detach()
 # Fix edge case in TTT loop gradient accumulation
 # Update colab runner with cached features workflow
+# Final TTT loop cleanup and comments
