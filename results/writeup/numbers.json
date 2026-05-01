@@ -594,9 +594,105 @@
     },
     "hours": 1.96
   },
+  "session_e": {
+    "question": "can a gate fit on gate-train predict which samples MEMO helps?",
+    "lr": 0.003,
+    "rule": "best cross-validated gate_train gain; a gate within 0.05 pp of it that costs less wins; stop if the best gain is under 0.2 pp",
+    "gate_train": {
+      "n": 8000,
+      "skip_soft": 61.361,
+      "memo_gain_pp": 0.237,
+      "oracle_gain_pp": 1.737,
+      "helped": 177,
+      "hurt": 166
+    },
+    "cv": {
+      "score": {
+        "gain_pp": 0.275,
+        "adapt_rate": 0.3779,
+        "avg_gflops": 81.87,
+        "auroc_helped_vs_hurt": 0.527
+      },
+      "free": {
+        "gain_pp": 0.342,
+        "adapt_rate": 0.3046,
+        "avg_gflops": 70.81,
+        "auroc_helped_vs_hurt": 0.527
+      },
+      "one_view": {
+        "gain_pp": 0.346,
+        "adapt_rate": 0.1653,
+        "avg_gflops": 69.64,
+        "auroc_helped_vs_hurt": 0.568
+      },
+      "four_views": {
+        "gain_pp": 0.35,
+        "adapt_rate": 0.2131,
+        "avg_gflops": 131.93,
+        "auroc_helped_vs_hurt": 0.566
+      },
+      "post": {
+        "gain_pp": 0.325,
+        "adapt_rate": 0.1539,
+        "avg_gflops": 175.82,
+        "auroc_helped_vs_hurt": 0.548
+      }
+    },
+    "chosen": "one_view",
+    "features": [
+      "maxprob",
+      "entropy_norm",
+      "margin",
+      "probe_agree",
+      "probe_kl"
+    ],
+    "threshold": 0.12410474029294821,
+    "eval_8k": {
+      "skip_soft": 61.624,
+      "oracle_gain_pp": 1.717,
+      "dense_memo": {
+        "method": "dense MEMO",
+        "soft": 61.674,
+        "delta_pp": 0.05,
+        "delta_ci95_pp": [
+          -0.308,
+          0.446
+        ],
+        "adapt_rate": 1.0,
+        "avg_gflops": 175.82,
+        "p50_gflops": 175.82,
+        "p95_gflops": 175.82,
+        "helped": 174,
+        "hurt": 166,
+        "mcnemar_skip_right_method_wrong": 155,
+        "mcnemar_skip_wrong_method_right": 160,
+        "mcnemar_exact_p": 0.8217
+      },
+      "gated": {
+        "method": "gated (one_view)",
+        "soft": 61.803,
+        "delta_pp": 0.179,
+        "delta_ci95_pp": [
+          -0.113,
+          0.467
+        ],
+        "adapt_rate": 0.142,
+        "avg_gflops": 66.68,
+        "p50_gflops": 48.62,
+        "p95_gflops": 175.82,
+        "helped": 114,
+        "hurt": 99,
+        "mcnemar_skip_right_method_wrong": 86,
+        "mcnemar_skip_wrong_method_right": 96,
+        "mcnemar_exact_p": 0.5048
+      }
+    },
+    "hours": 1.3
+  },
   "priced_hours": {
     "blur_s3": 1.05,
     "session_c_identity_and_noise_s5": 1.65,
-    "session_d_step_sweep": 1.96
+    "session_d_step_sweep": 1.96,
+    "session_e_signals": 1.3
   }
 }

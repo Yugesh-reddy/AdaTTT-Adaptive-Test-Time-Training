@@ -29,6 +29,9 @@ plt.rcParams.update({
     "figure.dpi": 120,
     "savefig.dpi": 150,
     "savefig.bbox": "tight",
+    # Fixed salt for SVG element ids (random per run otherwise), so regenerating
+    # an unchanged figure changes no bytes; see also Date=None in _save.
+    "svg.hashsalt": "adattt-writeup",
 })
 
 BLUE = "#0173B2"
@@ -283,6 +286,50 @@ def fig_session_d_eval(n: dict) -> None:
     _save(fig, "session_d_eval")
 
 
+def fig_session_e_gate(n: dict) -> None:
+    """Session E: gates cross-validated on gate-train, the chosen one scored once."""
+    e = n["session_e"]
+    fig, axes = plt.subplots(1, 2, figsize=(9.6, 4.0))
+    ax = axes[0]
+    names = list(e["cv"])
+    labels = {"score": "gate score", "free": "free", "one_view": "+1 view",
+              "four_views": "+4 views", "post": "after MEMO"}
+    bars = ax.bar([labels[k] for k in names], [e["cv"][k]["gain_pp"] for k in names],
+                  color=[BLUE if k == e["chosen"] else GRAY for k in names], width=0.6)
+    for bar, k in zip(bars, names):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
+                f"{e['cv'][k]['avg_gflops']:.0f}G", ha="center", va="bottom", fontsize=8)
+    ax.axhline(e["gate_train"]["memo_gain_pp"], color=ORANGE, linestyle="--", linewidth=1,
+               label=f"dense MEMO {e['gate_train']['memo_gain_pp']:+.2f}")
+    ax.axhline(0.2, color=RED, linestyle=":", linewidth=1, label="stop threshold 0.2")
+    ax.set_ylabel("Cross-validated gain vs skip (pp)")
+    ax.set_title(f"Gate-train 8k, 5-fold CV (chosen: {labels[e['chosen']]})", fontsize=10)
+    ax.tick_params(axis="x", labelsize=8.5)
+    ax.set_ylim(0, max(e["cv"][k]["gain_pp"] for k in names) * 1.18)
+    ax.legend(fontsize=7.5, loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=2, frameon=False)
+    ax = axes[1]
+    ev = e["eval_8k"]
+    ax.scatter([n["flops_ladder_gflops"]["base"]], [0.0], color=GREEN, s=48, zorder=3, label="skip")
+    for key, color, label in (("dense_memo", ORANGE, "dense MEMO"),
+                              ("gated", BLUE, f"benefit gate ({labels[e['chosen']]})")):
+        r = ev[key]
+        lo, hi = r["delta_ci95_pp"]
+        ax.errorbar([r["avg_gflops"]], [r["delta_pp"]],
+                    yerr=[[r["delta_pp"] - lo], [hi - r["delta_pp"]]],
+                    fmt="o", color=color, capsize=5, markersize=7, label=label)
+    ax.axhline(ev["oracle_gain_pp"], color=BLUE, linestyle="--", linewidth=1)
+    ax.text(n["flops_ladder_gflops"]["base"], ev["oracle_gain_pp"] + 0.04,
+            f"oracle {ev['oracle_gain_pp']:+.2f}", fontsize=8, color=BLUE)
+    ax.axhline(0.0, color=GRAY, linewidth=1)
+    ax.set_xlim(0, 195)
+    ax.set_xlabel("avg GFLOPs per sample (sample_flops)")
+    ax.set_ylabel("Soft delta vs skip, 95% CI (pp)")
+    ax.set_title("Eval 8k, scored once", fontsize=10)
+    ax.legend(fontsize=7.5, loc="center right")
+    fig.suptitle(f"Session E: a benefit gate at lr {e['lr']:g}, noise s5", y=1.03)
+    _save(fig, "session_e_gate")
+
+
 def main() -> int:
     with open(NUMBERS) as fh:
         n = json.load(fh)
@@ -295,6 +342,8 @@ def main() -> int:
     if n.get("session_d"):
         fig_session_d_sweep(n)
         fig_session_d_eval(n)
+    if n.get("session_e"):
+        fig_session_e_gate(n)
     print("wrote", OUT)
     return 0
 

@@ -231,6 +231,37 @@ def session_d_numbers(id_skip_soft: float) -> dict | None:
     }
 
 
+def session_e_numbers() -> dict | None:
+    """Session E: benefit gate fit on gate_train, scored once on the sealed eval 8k."""
+    writeup = os.path.join(ROOT, "results", "writeup")
+    spec_path = os.path.join(writeup, "gate_spec_session_e.json")
+    score_path = os.path.join(writeup, "gate_score_session_e.json")
+    if not (os.path.exists(spec_path) and os.path.exists(score_path)):
+        return None
+    from ttt.phase2_session import SESSION_E_LR
+
+    spec, score = _load(spec_path), _load(score_path)
+    rows = {r["method"]: r for r in score["rows"]}
+    name = spec["gate"]["name"]
+    return {
+        "question": "can a gate fit on gate-train predict which samples MEMO helps?",
+        "lr": SESSION_E_LR,
+        "rule": spec["selection"]["rule"],
+        "gate_train": spec["gate_train"],
+        "cv": spec["cv"],
+        "chosen": name,
+        "features": spec["gate"]["features"],
+        "threshold": spec["gate"]["threshold"],
+        "eval_8k": {
+            "skip_soft": score["skip_soft"],
+            "oracle_gain_pp": score["oracle_gain_pp"],
+            "dense_memo": rows["dense MEMO"],
+            "gated": rows[f"gated ({name})"],
+        },
+        "hours": _load(os.path.join(PHASE2, "orch_summary_e.json"))["vm_hours"],
+    }
+
+
 def main() -> int:
     AdaptiveRouter.configure_for_backend("clip")
     config = load_config(os.path.join(ROOT, "config", "config.yaml"))
@@ -273,10 +304,12 @@ def main() -> int:
         "phase1": phase1_numbers(ceiling),
         "eval_8k": eval_8k,
         "session_d": session_d_numbers(id_skip),
+        "session_e": session_e_numbers(),
         "priced_hours": {
             "blur_s3": _load(os.path.join(PHASE2, "blur_s3", "orch_summary.json"))["vm_hours"],
             "session_c_identity_and_noise_s5": _load(os.path.join(PHASE2, "orch_summary_c.json"))["vm_hours"],
             "session_d_step_sweep": _load(os.path.join(PHASE2, "orch_summary_d.json"))["vm_hours"],
+            "session_e_signals": _load(os.path.join(PHASE2, "orch_summary_e.json"))["vm_hours"],
         },
     }
     with open(OUT, "w") as fh:
