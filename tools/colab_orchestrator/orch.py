@@ -70,7 +70,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PAYLOAD = os.environ.get("ORCH_PAYLOAD", os.path.join(HERE, "adattt_phase1.tgz"))
 PROJECT = os.environ.get(
     "ORCH_PROJECT",
-    "/Users/yugesh/Library/CloudStorage/GoogleDrive-yugeshreddysappidi@gmail.com/My Drive/AdaTTT",
+    os.path.dirname(os.path.dirname(HERE))  # the project root; this file lives in tools/colab_orchestrator/,
 )
 WORK = os.environ.get("ORCH_WORK", os.path.join(HERE, "orch"))
 STATE = os.path.join(WORK, "state.json")

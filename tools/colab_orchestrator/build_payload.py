@@ -18,7 +18,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT = os.environ.get(
     "ORCH_PROJECT",
-    "/Users/yugesh/Library/CloudStorage/GoogleDrive-yugeshreddysappidi@gmail.com/My Drive/AdaTTT")
+    os.path.dirname(os.path.dirname(HERE)))  # the project root; this file lives in tools/colab_orchestrator/
 OUT = os.path.join(HERE, "adattt_phase1.tgz")
 CFG_VITBERT = os.path.join(PROJECT, "tools", "colab_orchestrator", "cfg_vitbert.yaml")
 ROOT = "AdaTTT/"

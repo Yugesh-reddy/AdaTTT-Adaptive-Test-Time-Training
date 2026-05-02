@@ -1,3 +1,4 @@
+import os
 """End-to-end smoke test of gpu/train_base.py on a tiny synthetic COCO (CPU/MPS).
 
 Both Phase 1 configs, 2 epochs, then --resume into a 3rd. Exercises everything
@@ -7,7 +8,7 @@ atomic checkpoints, preprocessing routing, and schedule-preserving resume.
 import json, os, random, shutil, subprocess, sys
 import torch, yaml
 from PIL import Image
-D = "/Users/yugesh/Library/CloudStorage/GoogleDrive-yugeshreddysappidi@gmail.com/My Drive/AdaTTT"
+D = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 S = os.path.dirname(os.path.abspath(__file__))
 T = os.path.join(S, "smoke"); shutil.rmtree(T, ignore_errors=True); os.makedirs(T)
 vocab = json.load(open(f"{D}/data/answer_vocab.json"))
