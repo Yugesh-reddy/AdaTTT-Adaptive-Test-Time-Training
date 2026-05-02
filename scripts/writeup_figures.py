@@ -330,6 +330,37 @@ def fig_session_e_gate(n: dict) -> None:
     _save(fig, "session_e_gate")
 
 
+def fig_abstention(n: dict) -> None:
+    """Answered accuracy vs coverage; operating points from gate-train thresholds."""
+    a = n["abstention"]
+    colors = {"identity": BLUE, "blur_s3": ORANGE, "noise_s5": RED}
+    markers = {"90": "o", "80": "s"}
+    fig, ax = plt.subplots(figsize=(7.0, 4.4))
+    for cond, r in a["conditions"].items():
+        rc = r["risk_coverage"]
+        ax.plot(rc["coverage"], rc["soft_answered"], color=colors[cond], linewidth=1.6,
+                label=COND_LABEL[cond])
+        for k, s in r["at_target"].items():
+            ax.scatter([s["coverage"]], [s["soft_answered"]], color=colors[cond],
+                       marker=markers[k], s=55, zorder=3, edgecolors="white", linewidths=0.8)
+    clean = a["conditions"]["identity"]["all_soft"]
+    ax.axhline(clean, color=GRAY, linestyle=":", linewidth=1)
+    ax.text(0.31, clean + 0.4, f"clean, answer everything: {clean:.2f}", fontsize=8, color="#555")
+    for k, marker in markers.items():
+        ax.scatter([], [], color="#555", marker=marker, s=45, label=f"{k}% threshold (fit on gate-train)")
+    ax.set_xlim(0.3, 1.01)
+    ax.set_xlabel("Coverage (fraction of questions answered)")
+    ax.set_ylabel("Official VQA soft on answered questions (%)")
+    ax.set_title("Answer only when confident: one threshold across shifts", fontsize=11)
+    ax.legend(fontsize=8, loc="upper right")
+    noise80 = a["conditions"]["noise_s5"]["at_target"]["80"]
+    fig.text(0.02, -0.03,
+             f"Noise s5 at {100 * noise80['coverage']:.0f}% coverage answers {noise80['soft_answered']:.1f}% "
+             f"correctly, above the clean model answering everything ({clean:.1f}%). "
+             "Unanswered questions need a fallback.", fontsize=8, color="#444")
+    _save(fig, "abstention")
+
+
 def main() -> int:
     with open(NUMBERS) as fh:
         n = json.load(fh)
@@ -344,6 +375,8 @@ def main() -> int:
         fig_session_d_eval(n)
     if n.get("session_e"):
         fig_session_e_gate(n)
+    if n.get("abstention"):
+        fig_abstention(n)
     print("wrote", OUT)
     return 0
 

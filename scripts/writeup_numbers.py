@@ -262,6 +262,12 @@ def session_e_numbers() -> dict | None:
     }
 
 
+def _abstention() -> dict | None:
+    """Selective prediction, written by scripts/abstention.py (thresholds fit on gate-train)."""
+    path = os.path.join(ROOT, "results", "writeup", "abstention.json")
+    return _load(path) if os.path.exists(path) else None
+
+
 def main() -> int:
     AdaptiveRouter.configure_for_backend("clip")
     config = load_config(os.path.join(ROOT, "config", "config.yaml"))
@@ -305,6 +311,7 @@ def main() -> int:
         "eval_8k": eval_8k,
         "session_d": session_d_numbers(id_skip),
         "session_e": session_e_numbers(),
+        "abstention": _abstention(),
         "priced_hours": {
             "blur_s3": _load(os.path.join(PHASE2, "blur_s3", "orch_summary.json"))["vm_hours"],
             "session_c_identity_and_noise_s5": _load(os.path.join(PHASE2, "orch_summary_c.json"))["vm_hours"],

@@ -689,6 +689,235 @@
     },
     "hours": 1.3
   },
+  "abstention": {
+    "signal": "gate_score = 0.5*entropy_norm + 0.5*(1-maxprob), unadapted model; lower = more confident",
+    "calibrated_on": "results/phase2/noise_s5_signals/gate_train/no_adapt.npz",
+    "thresholds": {
+      "90": 0.552734375,
+      "80": 0.415283203125
+    },
+    "conditions": {
+      "identity": {
+        "all_soft": 68.024,
+        "all_exact": 57.663,
+        "at_target": {
+          "90": {
+            "coverage": 0.9071,
+            "soft_answered": 73.45,
+            "exact_answered": 62.629,
+            "soft_gain_pp": 5.426,
+            "soft_gain_ci95_pp": [
+              5.005,
+              5.871
+            ]
+          },
+          "80": {
+            "coverage": 0.8129,
+            "soft_answered": 78.424,
+            "exact_answered": 67.661,
+            "soft_gain_pp": 10.401,
+            "soft_gain_ci95_pp": [
+              9.784,
+              10.995
+            ]
+          }
+        },
+        "risk_coverage": {
+          "coverage": [
+            0.05,
+            0.1,
+            0.15,
+            0.2,
+            0.25,
+            0.3,
+            0.35,
+            0.4,
+            0.45,
+            0.5,
+            0.55,
+            0.6,
+            0.65,
+            0.7,
+            0.75,
+            0.8,
+            0.85,
+            0.9,
+            0.95,
+            1.0
+          ],
+          "soft_answered": [
+            99.167,
+            98.583,
+            97.361,
+            96.896,
+            95.6,
+            94.68,
+            93.666,
+            92.343,
+            90.685,
+            89.333,
+            87.999,
+            86.464,
+            84.8,
+            83.064,
+            81.316,
+            79.124,
+            76.602,
+            73.864,
+            71.148,
+            68.024
+          ],
+          "aurc_soft_risk": 0.1216
+        }
+      },
+      "blur_s3": {
+        "all_soft": 66.032,
+        "all_exact": 55.763,
+        "at_target": {
+          "90": {
+            "coverage": 0.906,
+            "soft_answered": 71.384,
+            "exact_answered": 60.637,
+            "soft_gain_pp": 5.352,
+            "soft_gain_ci95_pp": [
+              4.93,
+              5.784
+            ]
+          },
+          "80": {
+            "coverage": 0.8099,
+            "soft_answered": 76.353,
+            "exact_answered": 65.581,
+            "soft_gain_pp": 10.321,
+            "soft_gain_ci95_pp": [
+              9.736,
+              10.922
+            ]
+          }
+        },
+        "risk_coverage": {
+          "coverage": [
+            0.05,
+            0.1,
+            0.15,
+            0.2,
+            0.25,
+            0.3,
+            0.35,
+            0.4,
+            0.45,
+            0.5,
+            0.55,
+            0.6,
+            0.65,
+            0.7,
+            0.75,
+            0.8,
+            0.85,
+            0.9,
+            0.95,
+            1.0
+          ],
+          "soft_answered": [
+            99.167,
+            97.75,
+            96.222,
+            95.312,
+            94.533,
+            93.152,
+            91.761,
+            90.656,
+            89.036,
+            87.141,
+            85.454,
+            83.575,
+            82.146,
+            80.892,
+            78.982,
+            76.811,
+            74.401,
+            71.661,
+            69.003,
+            66.032
+          ],
+          "aurc_soft_risk": 0.1397
+        }
+      },
+      "noise_s5": {
+        "all_soft": 61.624,
+        "all_exact": 51.15,
+        "at_target": {
+          "90": {
+            "coverage": 0.9025,
+            "soft_answered": 66.919,
+            "exact_answered": 55.831,
+            "soft_gain_pp": 5.296,
+            "soft_gain_ci95_pp": [
+              4.92,
+              5.717
+            ]
+          },
+          "80": {
+            "coverage": 0.8033,
+            "soft_answered": 72.024,
+            "exact_answered": 60.504,
+            "soft_gain_pp": 10.4,
+            "soft_gain_ci95_pp": [
+              9.825,
+              11.027
+            ]
+          }
+        },
+        "risk_coverage": {
+          "coverage": [
+            0.05,
+            0.1,
+            0.15,
+            0.2,
+            0.25,
+            0.3,
+            0.35,
+            0.4,
+            0.45,
+            0.5,
+            0.55,
+            0.6,
+            0.65,
+            0.7,
+            0.75,
+            0.8,
+            0.85,
+            0.9,
+            0.95,
+            1.0
+          ],
+          "soft_answered": [
+            94.583,
+            93.958,
+            92.888,
+            91.395,
+            90.066,
+            88.513,
+            87.178,
+            85.541,
+            83.944,
+            82.399,
+            80.9,
+            79.374,
+            77.883,
+            76.499,
+            74.382,
+            72.238,
+            69.665,
+            67.063,
+            64.38,
+            61.624
+          ],
+          "aurc_soft_risk": 0.1833
+        }
+      }
+    }
+  },
   "priced_hours": {
     "blur_s3": 1.05,
     "session_c_identity_and_noise_s5": 1.65,
