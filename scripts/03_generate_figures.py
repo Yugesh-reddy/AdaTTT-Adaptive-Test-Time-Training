@@ -931,3 +931,4 @@ if __name__ == "__main__":
 # Improve figure report pipeline for publication
 # Regenerate ablation figures with final data
 # Update figure 01 with final axis labels
+# Update figure 02 pareto frontier annotation
