@@ -286,3 +286,4 @@ H100 has 80GB VRAM — massive headroom. Can use larger batches freely.
 6. **Lazy image loading.** Never load all VQA images into memory. Load per-batch from disk/Drive.
 7. **Answer vocab.** Build once, save to `data/answer_vocab.json`, load everywhere.
 # Update CLAUDE.md with new workflow docs
+# Post-submission: add extended ablation notes
