@@ -19,6 +19,7 @@ The per-sample results stay gitignored under `results/`. `numbers.json` is gener
 | Session E frozen gate (in git) | `results/writeup/gate_spec_session_e.json` |
 | Session E eval score (in git) | `results/writeup/gate_score_session_e.json` |
 | Session E orchestrator | `results/phase2/orch_summary_e.json` |
+| Abstention analysis (in git) | `results/writeup/abstention.json`, from `scripts/abstention.py` |
 
 The npz `flops_g` fields use the pre-2026-09-18 cost accounting (MEMO4 billed 138.6G); `writeup_numbers.py` recomputes FLOPs from each sample's `adapted` flag.
 

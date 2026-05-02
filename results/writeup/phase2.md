@@ -49,3 +49,7 @@ The gate beats dense MEMO at 38% of its compute, but not significantly beyond sk
 ## Kill
 
 Stop the visual-corruption grid. Neither the original step, a gate-train-chosen larger one, nor a pre-registered benefit gate recovers measurable accuracy on the noise-s5 drop. The limit is the benefit signal: these per-sample signals predict who MEMO helps only weakly.
+
+## What works instead: abstention
+
+The same model's confidence ranks correctness well. One threshold, fit on the noise-s5 gate-train split, keeps coverage near its 90% / 80% target on clean, blurred and noised images. It raises accuracy on the answered questions by +5.3 / +10.4 pp in every condition, at no extra compute; the unanswered 10–20% need a fallback. Details: `REPORT.md` §2.10.
