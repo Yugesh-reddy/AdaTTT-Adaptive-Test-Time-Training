@@ -930,3 +930,4 @@ if __name__ == "__main__":
 # Regenerate question type delta with updated colors
 # Improve figure report pipeline for publication
 # Regenerate ablation figures with final data
+# Update figure 01 with final axis labels
