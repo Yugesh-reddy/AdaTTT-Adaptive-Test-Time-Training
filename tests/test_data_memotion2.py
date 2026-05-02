@@ -241,3 +241,4 @@ class TestMemotion2Dataset:
         # Fifth sample has empty text
         sample = ds[4]
         assert sample["input_ids"].shape[0] > 0  # Still has tokens (pad)
+# Add test_data_memotion2 comprehensive cases
