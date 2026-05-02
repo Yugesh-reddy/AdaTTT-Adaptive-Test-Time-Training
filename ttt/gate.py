@@ -203,3 +203,4 @@ class AdaptiveRouter:
 # Tune confidence threshold in gate module
 # Tighten confidence gate threshold sweep bounds
 # Final gate module cleanup and docstrings
+# Update figure 03 gate sweep color scheme
