@@ -154,3 +154,4 @@ python -m pytest tests/ -v
 - Google Colab Pro (H100) for GPU tasks
 # Update README with AdaTTT results summary
 # Final README polish and badges
+# Tag v1.0.0 release prep — final commit
