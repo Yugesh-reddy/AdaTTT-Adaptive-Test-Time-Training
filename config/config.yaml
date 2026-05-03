@@ -64,3 +64,4 @@ ttt_objectives:
 val_split: val
 vision_encoder: google/vit-base-patch16-224
 # Update config: add warmup_steps and lr_decay
+# Final config.yaml cleanup
