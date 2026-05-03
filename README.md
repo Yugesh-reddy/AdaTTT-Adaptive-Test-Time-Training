@@ -21,6 +21,15 @@ Full report: [`results/writeup/REPORT.md`](results/writeup/REPORT.md).
 | ![CLIP ceiling](results/writeup/figures/phase1_ceiling.png) | ![Benefit gate](results/writeup/figures/session_e_gate.png) | ![Abstention](results/writeup/figures/abstention.png) |
 | Phase 1: encoder swap | Phase 2: best TTA, pre-registered | Selective prediction |
 
+## Try it
+
+```bash
+pip install gradio
+python demo/app.py            # http://127.0.0.1:7860
+```
+
+Upload an image and ask a question. The model answers, or declines when its uncertainty is above the held-out threshold — the behaviour measured in section 3. Counting questions, the classic VQA weak spot, are the ones it declines most. The frozen CLIP encoders download on first run (~600 MB); `--coverage 80` makes it more cautious and `--no-abstain` makes it always answer.
+
 ## 1. A better encoder, not a better fusion
 
 Official VQA-v2 val (214,354 questions). The score is min(#humans/3, 1) with no credit for `<UNK>`.
@@ -97,7 +106,8 @@ tools/colab_orchestrator/    Colab runner and its simulator tests
 results/writeup/             report, generated numbers and figures
 data/                        frozen evaluation subsets (datasets are downloaded)
 tests/                       test suite
-demo/  notebooks/            v1 Gradio demo and notebooks
+demo/app.py                  interactive demo: answer or abstain
+notebooks/                   v1 notebooks
 ```
 
 ## Reproducing
