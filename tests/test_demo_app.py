@@ -43,7 +43,8 @@ def _runtime(peaked: bool):
     model.bert = _StubEncoder(8, 512)
     model.eval()
     # Force a confident or an unsure distribution, whatever the stub features are.
-    bias = torch.tensor([9.0, 0.0, 0.0, 0.0]) if peaked else torch.zeros(4)
+    # Distinct values: equal logits leave topk's tie order platform-dependent.
+    bias = torch.tensor([9.0, 3.0, 2.0, 1.0]) if peaked else torch.zeros(4)
     with torch.no_grad():
         final = model.prediction_head.classifier[-1]
         final.weight.zero_()
@@ -67,7 +68,7 @@ def test_confident_question_is_answered():
     assert result["abstained"] is False
     assert result["answer"] == "yes" and result["confidence"] > 0.9
     assert result["gate_score"] < 0.5
-    assert [a for a, _ in result["top"]] == ["yes", "no", "blue", "two"][:4]
+    assert [a for a, _ in result["top"]] == ["yes", "no", "blue", "two"]
     assert result["top"] == sorted(result["top"], key=lambda t: -t[1])
 
 
