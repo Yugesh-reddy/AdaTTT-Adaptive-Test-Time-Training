@@ -1,5 +1,7 @@
 # Artifact pointers (not in git)
 
+The per-sample results and the trained CLIP checkpoint are published in the [v2.0 release](https://github.com/Yugesh-reddy/AdaTTT-Adaptive-Test-Time-Training/releases/tag/v2.0); the paths below are where they belong in a checkout.
+
 The per-sample results stay gitignored under `results/`. `numbers.json` is generated from them with `python scripts/writeup_numbers.py`; the figures with `python scripts/writeup_figures.py` (CPU; reads `numbers.json`).
 
 | What | Path |

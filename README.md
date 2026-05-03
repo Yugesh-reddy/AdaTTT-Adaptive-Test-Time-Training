@@ -120,7 +120,17 @@ pytest tests/ -q                     # CPU only, no downloads
 python scripts/writeup_figures.py    # figures from results/writeup/numbers.json
 ```
 
-Training (`python gpu/train_base.py --config config/config.yaml --epochs 8`) and the Phase 2 sessions (`tools/colab_orchestrator/orch_phase2.py`) run on an A100. Their raw outputs are large and gitignored; `scripts/writeup_numbers.py` and `scripts/abstention.py` rebuild the writeup from them.
+Training (`python gpu/train_base.py --config config/config.yaml --epochs 8`) and the Phase 2 sessions (`tools/colab_orchestrator/orch_phase2.py`) run on an A100. Their raw outputs are gitignored, and published in the [v2.0 release](https://github.com/Yugesh-reddy/AdaTTT-Adaptive-Test-Time-Training/releases/tag/v2.0) so the results can be checked without a GPU:
+
+```bash
+gh release download v2.0 --repo Yugesh-reddy/AdaTTT-Adaptive-Test-Time-Training
+tar xzf phase2_results.tgz                                   # every per-sample result (1.8 MB)
+mkdir -p checkpoints/phase1_clip && mv clip_best.pt checkpoints/phase1_clip/best.pt
+
+python scripts/writeup_numbers.py    # rebuilds results/writeup/numbers.json from them
+python scripts/abstention.py         # rebuilds the abstention table
+python demo/app.py                   # the demo, with the trained model
+```
 
 ## Limitations
 
