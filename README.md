@@ -155,3 +155,4 @@ python -m pytest tests/ -v
 # Update README with AdaTTT results summary
 # Final README polish and badges
 # Tag v1.0.0 release prep — final commit
+# Project complete — AdaTTT v1.0 submitted
