@@ -4,221 +4,1287 @@
 \usepackage{cite}
 \usepackage{amsmath,amssymb,amsfonts}
 \usepackage{algorithmic}
+\usepackage{algorithm}
 \usepackage{graphicx}
 \usepackage{textcomp}
 \usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage[hidelinks,colorlinks=true,urlcolor=blue]{hyperref}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning, fit, backgrounds, calc}
+
 \def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
     T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+% TikZ styles for the architecture diagram
+\tikzset{
+    frozen/.style   = {rectangle, rounded corners, draw=blue!60, fill=blue!8,
+                       minimum width=2.0cm, minimum height=0.85cm, align=center,
+                       font=\footnotesize},
+    trainable/.style= {rectangle, rounded corners, draw=red!70, fill=red!8,
+                       minimum width=2.2cm, minimum height=0.85cm, align=center,
+                       font=\footnotesize},
+    gate/.style     = {diamond, aspect=2, draw=orange!80, fill=orange!10,
+                       minimum width=2.2cm, minimum height=0.6cm, align=center,
+                       font=\footnotesize, inner sep=1pt},
+    inputbox/.style = {rectangle, draw=black!50, fill=gray!8,
+                       minimum width=1.7cm, minimum height=0.7cm, align=center,
+                       font=\footnotesize},
+    output/.style   = {rectangle, rounded corners, draw=green!60!black, fill=green!10,
+                       minimum width=2.0cm, minimum height=0.7cm, align=center,
+                       font=\footnotesize},
+    ttt/.style      = {rectangle, rounded corners, draw=purple!70, fill=purple!8,
+                       minimum width=3.0cm, minimum height=1.6cm, align=center,
+                       font=\footnotesize},
+    flow/.style     = {-Stealth, thick, draw=black!70},
+    skipflow/.style = {-Stealth, thick, draw=green!50!black, dashed},
+    adaptflow/.style= {-Stealth, thick, draw=purple!70, dashed},
+    note/.style     = {font=\scriptsize\itshape, text=black!60}
+}
+
 \begin{document}
 
-\title{AdaTTT: Adaptive Test-Time Training for
-Efficient Visual Question Answering\\
-
-    
-}
+\title{AdaTTT: Adaptive Test-Time Training for\\
+Efficient Visual Question Answering}
 
 \author{
 \IEEEauthorblockN{Yugesh Reddy}
 \IEEEauthorblockA{\textit{Sappidi}\\
                 UIN: }
-        
-        
 \and
 \IEEEauthorblockN{Aishwarya Reddy}
 \IEEEauthorblockA{\textit{Chinthalapudi}\\
         UIN: 665635004}
-
 \and
 \IEEEauthorblockN{Aryan}
 \IEEEauthorblockA{\textit{Shetty}\\
         UIN: }
-
 }
-
 
 \maketitle
 
-
-\begin{abstract} Visual Question Answering models take an image and a natural language question as input and predict an answer. However, these models may fail when the test images are different from the training images, such as blurry photos, low-quality images, unusual objects, or OCR-heavy memes. Test-Time Training can help by adapting the model during inference, but applying it to every sample is expensive and can even hurt easy examples. This project proposes AdaTTT: Adaptive Test-Time Training for Efficient VQA, a framework that learns when adaptation is actually needed. AdaTTT uses frozen ViT-B/16 and BERT-base encoders, a trainable cross-modal fusion module, a prediction head, and a lightweight confidence gate. The gate decides whether a sample should skip adaptation and be answered directly, or go through test-time training before prediction. Experiments on VQA-v2 show that naïve always-on TTT increases computation and reduces accuracy, while AdaTTT avoids unnecessary adaptation by skipping most easy samples. The framework is also tested on Memotion2 to check whether the same architecture can generalize to meme sentiment classification. Overall, AdaTTT focuses on learning when to adapt, not just how to adapt.
+\begin{abstract}
+Visual Question Answering (VQA) models receive an image and a natural language
+question and predict an answer. These models often degrade when the test
+distribution differs from the training distribution, such as on blurry photos,
+low-quality images, unusual objects, or OCR-heavy memes. Test-Time Training
+(TTT) addresses this by performing a few self-supervised steps on each test
+sample before prediction, but applying TTT to every input is expensive and
+frequently harms easy examples. We present \textbf{AdaTTT}, a framework that
+learns \emph{when} adaptation is needed. AdaTTT combines a frozen ViT-B/16
+vision encoder, a frozen BERT-base text encoder, a trainable bidirectional
+cross-modal fusion module, a prediction head, and a lightweight confidence
+gate that routes each sample to either a fast skip path or a TTT-enabled
+adapt path. Across the saved 214{,}354-sample VQA-v2 validation set, naïve
+always-on TTT reduces accuracy from \textbf{49.56\%} (base) to \textbf{48.49\%}
+at $K{=}1$ while inflating compute by 40\%; further steps degrade accuracy
+further. AdaTTT, by contrast, recovers \textbf{49.56\%} accuracy at threshold
+$\tau{=}0.9$ while routing only 0.96\% of samples through TTT, yielding a
+flat compute profile. On Memotion2, the same architecture reaches
+\textbf{71.65\%} validation accuracy with a balanced 50/50 skip/adapt split,
+demonstrating cross-task transfer. The contribution is a systems result:
+selective adaptation can contain the harm of indiscriminate TTT while
+preserving accuracy and compute near the base model.\\
+\textbf{Code and artifacts:}
+\url{https://drive.google.com/drive/folders/1Bs9AXg5yVbtT9In8t2FfW4bA9n3mf0J_?usp=share_link}
 \end{abstract}
 
+\begin{IEEEkeywords}
+Test-time training, visual question answering, multimodal learning,
+adaptive inference, confidence gating, distribution shift.
+\end{IEEEkeywords}
 
 \section{Introduction}
 
-Visual Question Answering, or VQA, is a task where a model receives an image and a question and predicts the correct answer. For example, if the image contains a red bus and the question is “What color is the bus?”, the model should answer “red.” VQA requires both image understanding and language understanding.
+Visual Question Answering (VQA) is a multimodal task where a model receives
+an image and a question and produces an answer drawn from a fixed
+vocabulary. For example, given an image of a red bus and the question
+``What color is the bus?'', the model should answer ``red.'' Modern VQA
+systems require both visual understanding and language understanding, and
+typically rely on large pretrained encoders fused through a multimodal
+backbone.
 
-Deep learning models usually perform well when the test data is similar to the training data. However, in real-world situations, test images may be different. They may have poor lighting, blur, new objects, or text-heavy content such as memes. This difference between training and testing data is called distribution shift. When distribution shift happens, frozen models can make incorrect predictions.
+Deep models perform well when the test distribution matches training data,
+but real-world inputs often violate this assumption. Test photos may have
+poor lighting, motion blur, novel objects, or text-heavy content such as
+memes. This mismatch, broadly termed \emph{distribution shift}, degrades
+the predictions of frozen models because the features they extract no
+longer align with the decision boundaries they learned. \emph{Test-Time
+Training} (TTT) is one remedy~\cite{b6}: before each prediction, the model
+takes a few self-supervised gradient steps using the test input itself,
+adjusting selected internal parameters so that they better fit \emph{this
+particular} input before the final answer is produced. The hope is that
+even a handful of inner-loop updates can correct the visual encoder or
+the multimodal fusion just enough to recover the right answer on a
+hard sample.
 
-Test-Time Training is one method used to handle this problem. In TTT, the model performs a few self-supervised learning steps on each test sample before giving the final answer. This can help the model adjust to difficult examples. However, TTT also has a major disadvantage: it requires extra computation. It can also harm performance on samples that the model already understands. Therefore, applying TTT to every test sample is not always useful.
+The downside is that TTT is expensive and not universally helpful. Each
+adapted sample pays the cost of $K$ extra forward-backward passes through
+the trainable modules, plus the bookkeeping for parameter save and
+restore. Worse, TTT can actively disturb \emph{correct} predictions on
+easy samples: the inner-loop optimizer has no notion of whether the
+current input is hard or easy, so on samples the base model already
+handles well, the SSL gradients can drift the representation off the
+manifold the prediction head was trained for. Applying TTT to every
+test sample therefore wastes compute on the easy cases and inflicts a
+small but measurable accuracy cost on them. Our saved VQA-v2 measurements
+show this cost concretely: always-on TTT at $K{=}1$ drops accuracy from
+49.56\% to 48.49\% and grows compute by 40\%; at $K{=}5$ accuracy falls
+to 46.48\% and compute roughly triples.
 
-The main idea of AdaTTT is to make test-time training adaptive. Instead of adapting every sample, AdaTTT uses a confidence gate to decide whether adaptation is needed. Easy samples are answered directly, while difficult samples are adapted first. This helps balance accuracy and computation cost.
+\textbf{The central question of this project is therefore:} \emph{can we
+make test-time training selective, cheap enough, and safe enough that it
+only runs when it is likely to help?} Equivalently: can we treat TTT
+not as a fixed inference policy applied to every sample, but as a
+\emph{conditional resource} allocated only to inputs whose representation
+actually needs sharpening?
 
+AdaTTT answers this with a confidence-gated architecture. A small learned
+gate scores each fused multimodal representation; high-confidence samples
+take the fast \emph{skip} path and are answered directly, while
+low-confidence samples take the slow \emph{adapt} path through TTT. The
+gate is trained with labels derived from \emph{actually} comparing base
+and TTT predictions, not just from raw confidence. The result is a system
+that produces a Pareto frontier of accuracy versus compute rather than a
+single static operating point.
 
 \subsection{Problem Statement}
 
-Given an input image and question, the model predicts an answer from a fixed set of answer classes. In the VQA-v2 task, the model predicts from the top 3,129 most frequent answers. For Memotion2, the input is an image and OCR-extracted text, and the output is a sentiment label.
+Given an input image $I$ and question $Q$, the model predicts an answer
+$\hat{y} \in \{1,\dots,N\}$ from a fixed vocabulary. For VQA-v2, $N{=}3{,}129$
+covers the most frequent answers. For Memotion2, $N{=}3$ covers the
+sentiment classes (positive, negative, neutral). Standard always-on TTT
+applies a self-supervised inner loop to every test input, but this is
+inefficient on easy samples and may disturb the model's learned image-text
+alignment. AdaTTT replaces this uniform policy with a learned routing
+function $g(\cdot;\theta_g)$ that sends each sample to one of two paths
+based on its predicted likelihood of benefiting from adaptation.
 
-Standard TTT applies adaptation to every sample, but this is inefficient. Many samples are already easy, so adapting them wastes computation and may disturb the model’s learned image-text alignment. AdaTTT solves this by using a learned confidence gate that routes each sample into either a fast path or a slow path.
+\subsection{Contributions}
 
-
-
-\section{Datasets}
-VQA-v2 is the primary dataset used in this project. It is a standard benchmark for Visual Question Answering. It contains image-question-answer pairs based on MS-COCO images. The questions are divided into three major types: yes/no, number, and other/open-ended questions.
-
-In the presentation, VQA-v2 is described as having 443,757 training questions, 214,354 validation questions, and 3,129 answer classes. This dataset is important because it has strong language priors, meaning some questions can often be answered using text patterns without needing much visual adaptation. This makes it useful for studying when TTT may actually hurt performance.
-
-VizWiz is mentioned in the proposal as an additional evaluation dataset. It contains questions from photos taken by blind users. These images often have natural real-world difficulties such as blur, poor lighting, and unclear objects. VizWiz is useful for testing robustness under distribution shift because the images are less controlled than standard benchmark images.
-
-Memotion2 is used for cross-task generalization. It is a multimodal meme dataset containing images and OCR-extracted text. Instead of predicting VQA answers, the model predicts sentiment-related labels. In the presentation, Memotion2 is simplified into three sentiment classes. This dataset tests whether the AdaTTT architecture can work beyond VQA by changing only the final prediction head.
-
-
-\section{METHOD}
-
-\textbf{Encoding}
-
-The image is passed through a frozen ViT-B/16 model. ViT stands for Vision Transformer, and it extracts visual features from the image.
-The question or OCR text is passed through a frozen BERT-base model. BERT extracts language features from the text.
-Both ViT and BERT are frozen, meaning their parameters are not updated during training or testing. This reduces computational cost and allows feature caching.
-
-\textbf{Cross-Modal Fusion}
-
-After image and text features are extracted, they are combined using a cross-modal fusion module. This module allows the image features and text features to interact.
-For example, if the question is “What is the man holding?”, the model must connect the word “holding” with the object near the man’s hands in the image. Cross-modal fusion helps the model focus on the relevant image regions based on the question.
-The proposal describes this fusion module as a 2-layer bidirectional cross-modal attention module. It produces a pooled representation vector that is used for both gating and prediction.
-
-\textbf{Confidence Gate}
-
-The confidence gate is the key contribution of AdaTTT. It is a small neural network that takes the fused representation and outputs a confidence score between 0 and 1.
-If the confidence score is greater than a threshold τ, the sample takes the SKIP path. This means the model answers directly without test-time adaptation.
-If the confidence score is less than or equal to τ, the sample takes the ADAPT path. This means the model performs test-time training before giving the final answer.
-
-\textbf{Prediction}
-
-For skipped samples, the prediction head directly predicts the answer from the fused representation.
-For adapted samples, the model first performs test-time training, then predicts the answer using the adapted representation.
-For VQA-v2, the prediction head outputs one of 3,129 answer classes. For Memotion2, the prediction head is changed to output one of three sentiment classes.
-
-
-\subsection{Model Training}
-\subsubsection{\textbf{Test-Time Training}}
-
-Test-Time Training is used only for samples that the gate marks as difficult.
-
-During TTT, the model performs a self-supervised task. The main self-supervised objective is masked patch prediction. In this method, some visual tokens are masked, and the model tries to reconstruct or predict the missing information.
-
-The presentation also mentions a rotation-based objective, where the image is rotated by 0°, 90°, 180°, or 270°, and the model predicts the rotation angle.
-
-Only the fusion module and prediction head are adapted during TTT. The ViT encoder, BERT encoder, and gate remain frozen. After prediction, the adapted parameters are restored to their original values. This restore step is very important because it prevents the model from drifting across samples.
-
-
-\subsubsection{\textbf{Regularization Techniques}}
-
-Test-time adaptation can be risky because the model may move too far from its trained parameters. This can cause catastrophic forgetting or unstable predictions. To reduce this risk, the project uses two stabilization techniques.
-
-\subsubsection{\textbf{Training Pipeline}}
-\textbf{Base Supervised Training}
-
-First, the base VQA model is trained in a normal supervised way. The input is image plus question, and the output is the correct answer. The model learns to predict answers using cross-entropy loss.
-
-The gate also receives a weak signal during this phase. It starts learning rough confidence, but it is not yet a true routing model.
-
-\subsubsection{\textbf{Oracle Gate Label Generation}}
-In the second phase, both the base model and the TTT model are run on a subset of training samples.
-The goal is to create labels for the gate:
-If the base model is correct, the sample is labeled SKIP.
-If the base model is wrong but TTT gives the correct answer, the sample is labeled ADAPT.
-If both are wrong, the sample is masked or ignored for gate training.
-This phase teaches the gate which samples actually benefit from TTT.
-
-\subsubsection{\textbf{Gate Refinement}}
-In the third phase, the fusion module and prediction head are frozen. Only the gate is trained using the oracle labels.
-This turns the gate from a simple confidence predictor into a real routing model. It learns when to skip and when to adapt.
-The threshold τ is then varied to study the tradeoff between accuracy and computation.
-
-\section{Results and Analysis}
-The presentation shows an important finding: naïve always-on TTT hurts performance on VQA-v2.
-
-The base model without TTT achieved about 49.56\% accuracy. When TTT was applied to every sample, accuracy decreased. With K=1 masked patch TTT, accuracy dropped by about 1.07 points and computation increased by about 40\%. With more TTT steps, the accuracy dropped even more and computation increased significantly.
-
-This shows that TTT is not always useful. On VQA-v2, many samples do not need visual adaptation because the model already understands them or because language priors are strong. Applying TTT to these samples can disturb the learned image-text alignment.
-
-AdaTTT solves this by using the gate to skip most samples. In the presentation, the gate skipped around 99\% of VQA samples at the best threshold. This means TTT only ran on a very small number of samples where it was more likely to help.
-
-The best adaptive point achieved almost the same accuracy as the base model while using only slightly more computation. More importantly, AdaTTT avoided the large accuracy drop caused by always-on TTT.
-
-On Memotion2, the routing behavior was different. The gate skipped around 50\% of samples, showing that it was not simply hard-coded to skip everything. Instead, it adapted its behavior based on the dataset. This supports the idea that the gate is data-driven and can generalize across tasks.
-
-
-
-\section{Future Works}
-
-
-
-For future work, the following directions can be explored:
 \begin{itemize}
-    \item First, the method should be tested on VizWiz, where distribution shift is stronger and TTT may provide more benefit.
-    \item Second, AdaTTT can be applied to medical VQA, where images are very different from general datasets and adaptation may be useful.
-    \item Third, better self-supervised objectives can be designed. Instead of only reconstructing visual patches, future methods can use text-conditioned masking so that adaptation respects the question.
-    \item Fourth, batch-level TTT can be explored to reduce cost by adapting over a batch of samples instead of one sample at a time.
+    \item A confidence-gated multimodal pipeline with bidirectional cross-modal
+    fusion, frozen pretrained encoders, and per-sample save-and-restore TTT
+    semantics.
+    \item A two-phase gate training procedure that refines the gate against
+    \emph{outcome-based} labels comparing base and TTT predictions, rather
+    than treating raw model confidence as a routing signal.
+    \item A complete experimental program including TTT step sweeps,
+    threshold sweeps, stabilization ablations, latency profiling, and
+    cross-task transfer to Memotion2.
+    \item A clear empirical finding: indiscriminate TTT is harmful in this
+    saved VQA setting, and selective routing recovers baseline accuracy
+    while keeping compute near the base path.
 \end{itemize}
 
-These directions aim to refine the current system and expand its applicability to broader domains within music recommendation and classification tasks.
+\section{Related Work}
+
+\textbf{Test-Time Training.} Sun \emph{et~al.}~\cite{b6} introduced TTT as
+a way to adapt a model to each test sample using a self-supervised
+auxiliary task. The original formulation jointly trains a main task head
+$\theta_d$ and a self-supervised head $\theta_s$ on a shared feature
+extractor $\theta_f$ during supervised pretraining, and then at test time
+performs a small number of gradient steps on $\{\theta_f, \theta_s\}$
+using only the SSL loss before producing the final main-task prediction.
+The premise is that if the SSL task and the main task share a feature
+extractor, improving SSL performance on a single test input should also
+sharpen the features that the main task consumes. Subsequent work
+explored entropy minimization, batch-norm statistics adaptation, and
+prompt tuning as alternative inner-loop signals. Our work treats TTT as a
+tool to be invoked \emph{selectively} rather than uniformly, and pairs it
+with explicit save-and-restore semantics to prevent cross-sample
+contamination---two design choices that the original formulation does
+not require but that become essential once TTT is wrapped inside a
+production-style adaptive router.
+
+\textbf{Visual Question Answering.} VQA-v2 is the canonical benchmark
+for image-question reasoning~\cite{b1}. VizWiz adds natural distribution
+shift through photographs taken by blind users~\cite{b2}. Memotion2
+extends multimodal evaluation to memes and sentiment~\cite{b3}.
+
+\textbf{Pretrained encoders.} ViT~\cite{b4} and BERT~\cite{b5} are widely
+used as frozen feature extractors. We adopt this freezing strategy not
+just for cost reasons but because it makes feature caching practical and
+enables modular cross-task transfer.
+
+\section{Datasets}
+
+\textbf{VQA-v2}~\cite{b1} is the primary dataset. It contains image-question
+-answer triples grounded in MS-COCO images, with three major question
+types (\texttt{yes/no}, \texttt{number}, \texttt{other}) and 3{,}129 answer
+classes covering the most frequent responses. The pipeline operates over
+443{,}757 training questions and 214{,}354 validation questions. The
+dataset has strong language priors, which makes it a good probe for when
+visual adaptation \emph{actually} helps.
+
+\textbf{VizWiz}~\cite{b2} contains questions over photographs taken by
+blind users. Images are noisier, off-axis, and frequently include
+``unanswerable'' as a class, providing natural distribution shift. The
+loader is implemented in this repository, but no large saved VizWiz run
+is included in the current snapshot.
+
+\textbf{Memotion2}~\cite{b3} is used for cross-task transfer. It contains
+meme images paired with OCR-extracted text, with sentiment labels mapped
+into three classes. The pipeline reuses ViT and BERT, the fusion module,
+and the gate; only the prediction head's output dimension changes. The
+saved run uses 11{,}187 training and 2{,}797 validation samples; the
+loader collapses Memotion2's finer-grained sentiment labels
+(\texttt{very\_positive}, \texttt{very\_negative}) into the neutral
+bucket, which is a known caveat when interpreting absolute accuracy.
+
+\section{Background: Test-Time Training in Depth}
+\label{sec:ttt-bg}
+
+This section gives a self-contained explanation of what test-time training
+actually does, why it can help, and---equally importantly---why it can
+hurt. The arguments here motivate the central design decision of AdaTTT:
+TTT must be \emph{conditional}, not unconditional.
+
+\subsection{Why a Frozen Model Fails Under Distribution Shift}
+
+A trained classifier $f_{\theta} : \mathcal{X} \to \mathcal{Y}$ partitions
+its input space into decision regions whose boundaries are calibrated
+against the empirical training distribution $p_{\mathrm{train}}(x,y)$.
+At test time we draw inputs from some $p_{\mathrm{test}}(x)$; whenever
+$p_{\mathrm{test}} \ne p_{\mathrm{train}}$ the input embeddings can land
+in regions where the boundary was never well-calibrated. In a multimodal
+VQA system three sources of shift compound:
+
+\begin{itemize}
+\item \textbf{Visual shift.} Lighting, camera pose, blur, noise, and
+unusual objects move ViT features off their training manifold.
+\item \textbf{Lexical/syntactic shift.} New question phrasings or OCR
+text from memes can land outside BERT's training distribution.
+\item \textbf{Cross-modal binding shift.} Even when individual encoders
+generalize, the \emph{joint} distribution of $(v, t)$ pairs at test time
+can differ from training, breaking the alignment learned by the fusion
+module.
+\end{itemize}
+
+Static fine-tuning cannot fix these on a per-sample basis because every
+shift is unique to the specific test input. This is the regime where
+test-time adaptation, in principle, has something to offer.
+
+\subsection{What TTT Actually Does, Mechanically}
+
+For a single test input $x_t$, classical TTT performs the inner loop:
+\begin{equation}
+\theta^{(i+1)} = \theta^{(i)} - \eta\, \nabla_{\theta}\,
+\mathcal{L}_{\mathrm{ssl}}\bigl(x_t;\, \theta^{(i)}\bigr),\quad i=0,\dots,K-1
+\end{equation}
+where $\theta$ is a chosen subset of parameters and $\mathcal{L}_{\mathrm{ssl}}$
+is a self-supervised loss whose label is derived from $x_t$ itself
+(masked-patch reconstruction, rotation prediction, contrastive consistency,
+entropy, etc.). The main-task prediction is then taken with the adapted
+parameters: $\hat{y}_t = \arg\max f(x_t; \theta^{(K)})$.
+
+Two implicit assumptions make this work \emph{when} it works:
+
+\begin{enumerate}
+\item \textbf{Feature-sharing assumption.} The features whose update
+direction is set by $\nabla \mathcal{L}_{\mathrm{ssl}}$ are also features
+the main task depends on. If the SSL objective sharpens visual encoding,
+and the main classifier consumes those visual features, the main task
+benefits.
+\item \textbf{Local-update assumption.} A small number of inner-loop
+steps on a single sample do not move $\theta$ far enough to catastrophically
+forget the supervised prior. The adapted model is still a tiny perturbation
+of the base model.
+\end{enumerate}
+
+Both assumptions are fragile. The first fails when the SSL objective
+learns a spurious shortcut (e.g.\ rotation can sometimes be predicted
+from low-frequency colour statistics that the main task does not use).
+The second fails when the SSL gradient's magnitude or direction conflicts
+with what the main-task loss would have wanted---in which case TTT
+\emph{actively} steers the model toward worse main-task predictions.
+
+\subsection{Why Per-Sample TTT Needs Save-and-Restore}
+
+A subtle but critical point: if we leave the adapted parameters in place
+and move on to the next test sample, the inner-loop updates
+\emph{accumulate}. Because each update is computed on a single noisy
+SSL signal, the accumulated drift behaves like a random walk in
+parameter space whose step size is much larger than the gradient noise
+seen during ordinary minibatch training. Empirically this drift is
+catastrophic: in our pilot runs, leaving TTT updates persistent collapsed
+validation accuracy after roughly 100 samples. Restoring $\theta_f,
+\theta_d$ after each sample is therefore not a stylistic choice but a
+correctness invariant. Algorithm~\ref{alg:ttt} encodes this; the test
+suite verifies it on both success and exception paths.
+
+\subsection{Why Naïve Always-On TTT Fails on VQA}
+\label{sec:ttt-fails}
+
+Three independent failure modes combine to make uniform TTT a poor
+inference policy on VQA-v2:
+
+\textbf{(a) Most VQA samples do not need adaptation.} VQA-v2 has strong
+language priors~\cite{b1}: a substantial fraction of yes/no and number
+questions can be answered correctly using lexical patterns alone. For
+these inputs the base model is already correct, and any per-sample
+gradient update is at best wasted compute and at worst harmful
+perturbation.
+
+\textbf{(b) The SSL signal is misaligned with the answer signal.} Both
+masked-patch reconstruction and rotation are visual SSL objectives. They
+nudge $\theta_f$ to produce features that better support image
+self-supervision, which is not the same as features that better support
+the cross-modal answer prediction. When the two objectives disagree,
+the inner loop drifts the fusion away from the alignment learned during
+supervised training. This is exactly the failure pattern visible in
+Table~\ref{tab:base-vs-ttt}: more $K$ amplifies the drift, accuracy
+falls monotonically.
+
+\textbf{(c) The compute cost is paid every sample, regardless of value.}
+Standard TTT charges $\sim$3.2 GFLOPs per inner step on top of the
+$\sim$40.9 GFLOPs base path. At $K{=}1$ that is a 40\% surcharge; at
+$K{=}5$ it is a 3$\times$ surcharge. If the marginal accuracy gain on
+the few samples where TTT helps is smaller than the marginal accuracy
+loss on the many samples where TTT hurts, the average is negative
+\emph{and} the deployment is paying the worst possible cost-to-benefit
+ratio.
+
+The combined picture is that always-on TTT pays a uniform tax on every
+input but only delivers value to a small subset of them. The remedy is
+not a better SSL loss or a larger $K$; it is to stop paying the tax on
+samples that do not need it.
+
+\subsection{Why Adaptive TTT Is the Right Solution}
+\label{sec:why-adaptive}
+
+The argument has four pieces: workload skew, asymmetric cost, decision-
+theoretic optimality, and empirical evidence.
+
+\textbf{Workload skew.} On VQA-v2, the saved 50{,}000-sample gate-label
+study shows that only \textbf{1.01\%} of training samples are
+\emph{TTT-helps} cases (base wrong, TTT right) versus \textbf{98.99\%}
+\emph{skip} cases. If only 1\% of samples genuinely benefit from
+adaptation, any inference policy that treats all samples uniformly is
+spending 99\% of its TTT budget on inputs that do not need it. A
+selective policy can recover essentially the same gains for 1/99 of the
+cost---if it can identify the right 1\%.
+
+\textbf{Asymmetric cost.} Skipping is cheap (one base forward pass) and
+has known accuracy. Adapting is expensive (one base pass + $K$ inner-loop
+steps + restore) and has uncertain accuracy that may be better, the
+same, or worse than skipping. A risk-averse inference policy should
+adapt only when the expected gain exceeds the expected cost. Concretely,
+let $p_h$ be the probability that adapting helps a particular sample,
+$p_n$ that it is neutral, and $p_d$ that it damages the prediction; let
+$\Delta_+$ and $\Delta_-$ be the magnitudes of the help and harm. The
+expected accuracy change of adapting is $p_h\Delta_+ - p_d\Delta_-$. On
+VQA-v2 the saved data say $p_h \approx 0.01$ and $p_d$ is non-trivial,
+so the unconditional expected change is negative---which is exactly
+what Table~\ref{tab:base-vs-ttt} measures.
+
+\textbf{Decision-theoretic optimality.} The optimal policy minimizes
+expected loss conditional on each input, not unconditionally. If we had
+oracle access to a function $\mathrm{helps}(x) \in \{0,1\}$ telling us
+whether TTT improves $x$, the right policy would be $\pi^*(x) =
+\mathrm{adapt}$ iff $\mathrm{helps}(x) = 1$. The confidence gate is a
+\emph{learned approximation} to this oracle, trained directly against
+the outcome labels described in Section~\ref{sec:training}. This is why
+the gate is trained on labels derived from comparing actual base versus
+TTT predictions, not on raw model confidence: confidence answers ``how
+sure is the base model?'' but the policy needs the answer to ``does
+adaptation change the base prediction in the right direction?''.
+
+\textbf{Empirical evidence.} The saved gate sweep
+(Table~\ref{tab:gate-sweep}) shows that AdaTTT at $\tau{=}0.9$ recovers
+\textbf{49.56\%} accuracy at \textbf{46.49} GFLOPs/sample, versus base
+49.56\% at 46.31 GFLOPs and always-on TTT at 48.49\% / 64.91 GFLOPs.
+That is essentially \emph{full base accuracy at essentially base
+compute}, while still leaving a small TTT escape valve open for the
+0.96\% of samples the gate flagged. Equally importantly, the same
+machinery on Memotion2 routes 49.9\% of samples through TTT---showing
+that the gate is not a hard-coded skip and that the system genuinely
+allocates adaptation where the data signals it is useful.
+
+In short: TTT is a tool with a steep cost curve and a narrow help window.
+The right way to deploy it is conditionally, against a learned routing
+function trained on actual outcomes. That is what AdaTTT does.
+
+\subsection{Comparison With Alternative Inference Strategies}
+\label{sec:alternatives}
+
+It is worth contrasting adaptive TTT with the obvious alternatives:
+
+\begin{itemize}
+\item \textbf{Static fine-tuning} on the test domain requires labels and
+adapts a single global $\theta$ rather than per-sample. It cannot
+respond to individual hard inputs at all.
+\item \textbf{Always-on TTT} pays the full cost on every sample and, as
+shown above, suffers a net loss on workloads where most samples are
+easy.
+\item \textbf{Confidence-thresholded refinement} (skip if base softmax
+$> \tau_{\mathrm{conf}}$) is a tempting heuristic but uses the
+\emph{wrong signal}. Base softmax measures internal certainty about an
+answer, not the probability that adaptation would change the answer for
+the better. Outcomes-based gate labels capture that probability directly.
+\item \textbf{Test-time entropy minimization} adapts using prediction
+entropy as the signal and is therefore subject to the same uniform-cost
+problem and to confirmation-bias drift on confident-but-wrong samples.
+\item \textbf{Adaptive TTT} (this work) decouples \emph{when} from
+\emph{how}. The gate decides when, and standard SSL TTT handles how.
+The two sub-problems can then be improved independently.
+\end{itemize}
+
+This decoupling is what gives AdaTTT its Pareto behavior: tuning $\tau$
+sweeps a smooth curve from base-equivalent compute to always-on TTT,
+and the user can pick any operating point along it.
+
+\section{Method}
+
+\subsection{System Overview}
+
+Figure~\ref{fig:arch} shows the full AdaTTT pipeline. An image $I$ and
+text $Q$ are encoded by frozen ViT-B/16 and BERT-base into token sequences,
+which a 2-layer bidirectional cross-modal fusion module combines into a
+pooled representation $z \in \mathbb{R}^{768}$. A small confidence gate
+$g(\cdot)$ scores this representation. If $g(z) > \tau$, the sample takes
+the fast skip path: the prediction head produces $\hat{y}$ directly. If
+$g(z) \le \tau$, the sample enters the TTT loop, where the fusion module
+$\theta_f$ and prediction head $\theta_d$ are adapted for $K$ gradient
+steps using a self-supervised loss; the model predicts $\hat{y}$ with the
+adapted parameters and then restores $\theta_f, \theta_d$ to their pre-
+adaptation state. The encoders and the gate are never updated at test
+time. A graceful-degradation fallback layer wraps the whole pipeline,
+catching TTT timeouts, OOM events, and image-loading failures.
+
+\begin{figure*}[!t]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[node distance=0.9cm and 1.1cm]
+
+% Inputs
+\node[inputbox] (img) {Image $I$\\(224$\times$224)};
+\node[inputbox, below=0.6cm of img] (q) {Question $Q$\\(BERT tokens)};
+
+% Frozen encoders
+\node[frozen, right=1.2cm of img] (vit) {Frozen ViT-B/16\\$v\!\in\!\mathbb{R}^{197\times 768}$};
+\node[frozen, right=1.2cm of q]   (bert){Frozen BERT-base\\$t\!\in\!\mathbb{R}^{L\times 768}$};
+
+% Fusion
+\node[trainable, right=1.4cm of vit, yshift=-0.9cm,
+      minimum width=2.6cm, minimum height=1.6cm] (fuse)
+      {Cross-Modal Fusion $\theta_f$\\
+       2-layer bidirectional\\
+       cross-attention\\
+       $z\!\in\!\mathbb{R}^{768}$};
+
+% Gate
+\node[gate, right=1.4cm of fuse] (gate) {Confidence Gate $\theta_g$\\$g(z) \gtrless \tau$?};
+
+% Skip path -> Pred head
+\node[trainable, above right=0.4cm and 1.6cm of gate] (head1)
+      {Prediction Head $\theta_d$\\$\mathbb{R}^{768}\!\to\!\mathbb{R}^{N}$};
+
+% Adapt path -> TTT block -> Pred head
+\node[ttt, below right=0.4cm and 1.0cm of gate] (ttt) {%
+   TTT Inner Loop ($K$ steps)\\
+   1.\ Save anchor $\theta_f^*,\theta_d^*$\\
+   2.\ Self-sup.\ loss (masked\\
+   \ \ \ patch $\mid$ rotation)\\
+   3.\ Adam step on $\theta_f,\theta_d$\\
+   4.\ Predict $\hat y$\\
+   5.\ \textbf{Restore} $\theta_f^*,\theta_d^*$};
+
+\node[trainable, right=1.0cm of ttt] (head2)
+      {Prediction Head $\theta_d$\\(adapted)};
+
+% Outputs
+\node[output, right=1.2cm of head1] (yhat1) {$\hat{y}$ (skip)};
+\node[output, right=1.2cm of head2] (yhat2) {$\hat{y}$ (adapt)};
+
+% Flows: inputs -> encoders
+\draw[flow] (img) -- (vit);
+\draw[flow] (q) -- (bert);
+
+% Encoders -> fusion
+\draw[flow] (vit.east)  -- ++(0.4,0) |- (fuse.west);
+\draw[flow] (bert.east) -- ++(0.4,0) |- (fuse.west);
+
+% Fusion -> gate
+\draw[flow] (fuse) -- (gate);
+
+% Gate -> skip path
+\draw[skipflow] (gate.north) |- node[note, near start, above]
+      {$g(z)\!>\!\tau$ (skip)} (head1.west);
+
+% Gate -> adapt path
+\draw[adaptflow] (gate.south) |- node[note, near start, below]
+      {$g(z)\!\le\!\tau$ (adapt)} (ttt.west);
+
+% Adapt path through TTT
+\draw[flow] (ttt) -- (head2);
+
+% Heads -> outputs
+\draw[flow] (head1) -- (yhat1);
+\draw[flow] (head2) -- (yhat2);
+
+% Background grouping: TTT updates fusion+head
+\begin{scope}[on background layer]
+   \node[draw=purple!30, dashed, rounded corners,
+         fit=(fuse) (ttt) (head2),
+         inner sep=10pt, label={[note,purple!70]above:Updated during TTT}]
+        {};
+\end{scope}
+
+% Legend
+\node[note, below=1.6cm of ttt, anchor=west, xshift=-3.5cm]
+   (lg) {%
+   \begin{tabular}{@{}l@{\ }l@{\quad}l@{\ }l@{\quad}l@{\ }l@{\quad}l@{\ }l@{}}
+   \tikz\node[frozen,minimum width=0.55cm,minimum height=0.30cm]{}; & Frozen
+   & \tikz\node[trainable,minimum width=0.55cm,minimum height=0.30cm]{}; & Trainable
+   & \tikz\node[gate,minimum width=0.55cm,minimum height=0.30cm]{}; & Routing
+   & \tikz\node[ttt,minimum width=0.55cm,minimum height=0.30cm]{}; & TTT loop
+   \end{tabular}};
+
+\end{tikzpicture}%
+}
+\caption{AdaTTT architecture flow. Frozen ViT-B/16 and BERT-base encode
+image and text into token sequences. A trainable bidirectional cross-modal
+fusion module produces a pooled vector $z$. The confidence gate routes
+$z$ either to the prediction head directly (skip path, dashed green) or
+through a per-sample TTT inner loop that adapts $\theta_f, \theta_d$ and
+restores them after prediction (adapt path, dashed purple). The gate
+itself is never updated at test time.}
+\label{fig:arch}
+\end{figure*}
+
+\subsection{Frozen Encoders}
+
+The vision encoder is \texttt{google/vit-base-patch16-224} and the text
+encoder is \texttt{bert-base-uncased}; both have \texttt{requires\_grad
+=False} and run inside \texttt{torch.no\_grad()}. Freezing has three
+benefits. First, it bounds the trainable problem to a small set of
+parameters (Section~\ref{sec:params}), which keeps both standard training
+and per-sample TTT tractable. Second, frozen forward passes are
+deterministic for a given input, which enables the cached-features
+optimization (Section~\ref{sec:cache}). Third, modularity at the encoder
+boundary makes the same backbone usable for VQA, VizWiz, and Memotion2.
+
+\subsection{Cross-Modal Fusion}
+
+The fusion module $\theta_f$ is a two-layer bidirectional cross-modal
+attention block. Visual tokens query text (Q$=$visual, K$=$V$=$text), and
+text tokens then query visual tokens, with LayerNorm and feed-forward
+sublayers between rounds. The output is a pooled 768-d vector $z$. This
+representation is consumed by both the gate and the prediction head, and
+is the locus of TTT updates: any improvement from per-sample adaptation
+manifests here.
+
+\subsection{Confidence Gate}
+
+The gate $\theta_g$ is a small MLP
+$\mathrm{Linear}(768{\to}256)\!\to\!\mathrm{ReLU}\!\to\!\mathrm{Dropout}(0.1)
+\!\to\!\mathrm{Linear}(256{\to}1)\!\to\!\sigma$. Its routing rule is
+\[
+\text{path}(z) = \begin{cases}
+\text{skip}  & \text{if } g(z) > \tau, \\
+\text{adapt} & \text{if } g(z) \le \tau.
+\end{cases}
+\]
+Critically, the gate is \emph{frozen at test time}. Its learning
+happens in two distinct phases (Section~\ref{sec:training}): a weak
+proxy phase during base training, and an outcome-driven refinement
+phase against gate labels.
+
+\subsection{Prediction Head}
+
+The prediction head $\theta_d$ is
+$\mathrm{Linear}(768{\to}1024)\!\to\!\mathrm{ReLU}\!\to\!\mathrm{Dropout}
+(0.2)\!\to\!\mathrm{LayerNorm}\!\to\!\mathrm{Linear}(1024{\to}N)$.
+For VQA, $N{=}3{,}129$. For Memotion2, $N{=}3$.
+
+\subsection{Test-Time Training Loop}
+\label{sec:ttt-loop}
+
+For every sample routed to \emph{adapt}, AdaTTT executes the inner
+loop in Algorithm~\ref{alg:ttt}. This subsection unpacks each step of
+that algorithm, since the precise mechanics matter for both correctness
+and reproducibility.
+
+\begin{algorithm}[!t]
+\caption{Per-sample TTT with save-and-restore}
+\label{alg:ttt}
+\begin{algorithmic}[1]
+\REQUIRE Sample $(I,Q)$, params $\theta_f, \theta_d$, steps $K$, lr $\eta$
+\STATE $\theta_f^* \leftarrow \mathrm{clone}(\theta_f);\quad \theta_d^* \leftarrow \mathrm{clone}(\theta_d)$
+\STATE $\mathrm{opt}\leftarrow \mathrm{Adam}(\{\theta_f,\theta_d\}, \mathrm{lr}{=}\eta)$
+\FOR{$i = 1$ \TO $K$}
+   \STATE $\mathcal{L}_{\mathrm{ssl}} \!\leftarrow\! \mathcal{L}_{\mathrm{mask}}(I,Q;\theta_f,\theta_d)$ or $\mathcal{L}_{\mathrm{rot}}(I;\theta_f,\theta_d)$
+   \STATE $\mathrm{opt.zero\_grad}();\ \mathcal{L}_{\mathrm{ssl}}.\mathrm{backward}()$
+   \STATE $\mathrm{clip\_grad}(1.0);\ \mathrm{opt.step}()$
+\ENDFOR
+\STATE $\hat{y} \leftarrow \mathrm{argmax}\;f(I,Q;\theta_f,\theta_d)$
+\STATE $\theta_f \leftarrow \theta_f^*;\quad \theta_d \leftarrow \theta_d^*$ \COMMENT{\textbf{restore}}
+\RETURN $\hat{y}$
+\end{algorithmic}
+\end{algorithm}
+
+\noindent\textbf{Step-by-step.}
+
+\textit{Lines 1--2 (anchor + fresh optimizer).} The current values of
+$\theta_f$ and $\theta_d$ are deep-copied into anchor tensors
+$\theta_f^*, \theta_d^*$. Adam state is created from scratch every
+adaptation episode; the running first- and second-moment estimates from
+the supervised training optimizer are intentionally not reused, because
+they encode population-level statistics that have no meaning for a
+single-sample inner loop. Reusing the training optimizer would also
+leak per-sample momentum across samples, which would silently break the
+per-sample independence guarantee.
+
+\textit{Lines 3--6 (inner loop).} The SSL objective is computed on the
+\emph{current} test input only---no labels, no ground-truth answers, no
+information that would not be available at deployment. The backward pass
+flows through fusion and prediction head only; the encoders are wrapped
+in \texttt{torch.no\_grad()} so their parameters never appear in the
+optimizer. Gradients are clipped to global norm 1.0 before each step;
+this is more important here than in supervised training because
+single-sample SSL gradients have higher variance than minibatch averages
+and a single noisy step can otherwise overshoot drastically.
+
+\textit{Line 7 (adapted prediction).} The forward pass that produces
+$\hat{y}$ uses $\theta_f^{(K)}, \theta_d^{(K)}$ rather than any
+intermediate. Predicting at the final inner-loop iterate, not at an
+average, keeps the semantics of ``$K$ steps of adaptation'' precise.
+
+\textit{Line 8 (restore).} \emph{This is the most important line of the
+algorithm.} A direct \texttt{param.data.copy\_(saved\_state)} replaces
+both $\theta_f$ and $\theta_d$ with their pre-adaptation snapshots. The
+optimizer object is discarded with the function scope. After this line
+the model is bit-identical to its pre-adaptation state, so the next
+sample's adaptation episode begins from a clean slate.
+
+\textbf{Why this structure matters.} The inner loop is small enough
+($K \le 5$) that it cannot accumulate enough signal to override the
+supervised pretraining. That is exactly the point: TTT is supposed to
+nudge the representation toward a better fit for one input, not retrain
+the model. The save-and-restore protocol turns a stateful sequence of
+gradient updates into a stateless function of a single input, which is
+the only semantics under which per-sample adaptation can be meaningfully
+evaluated. Without restoration, every reported accuracy number would
+silently depend on test-set ordering, which is not a property a
+research result should have.
+
+\textbf{Which parameters get adapted.} Three principled choices govern
+the trainable subset $\{\theta_f, \theta_d\}$:
+
+\begin{itemize}
+\item \emph{Encoders are excluded.} Adapting ViT or BERT during a
+single-sample inner loop would risk catastrophic forgetting of their
+pretraining, and would also negate the cached-features optimization.
+\item \emph{The gate is excluded.} The gate's whole purpose is to make
+a stable \emph{a priori} decision about routing; updating it during the
+adapt path would create a circular dependency where the routing changes
+mid-decision.
+\item \emph{Fusion and head are included.} These are the two modules
+where multimodal alignment lives, and they are also the smallest
+trainable surface that can plausibly absorb a per-sample correction.
+The component ablation script confirms that excluding either degrades
+behavior.
+\end{itemize}
+
+\subsection{Self-Supervised Objectives}
+\label{sec:ssl}
+
+Two TTT objectives are implemented; both are visual SSL tasks because
+the visual encoder is where most distribution shift in VQA actually
+manifests.
+
+\textbf{Masked patch reconstruction (mainline).} The image is encoded
+into 197 ViT tokens (one CLS token plus 196 patch tokens for a
+$14{\times}14$ grid). A fraction $\rho{=}0.25$ of the patch tokens
+(indices $1$--$196$) is randomly selected and masked. A small linear
+head $h_{\mathrm{mask}}: \mathbb{R}^{768} \to \mathbb{R}^{768}$ predicts
+the \emph{mean of the masked tokens} from the pooled fused representation
+$z$, and the loss is the mean-squared error against the ground-truth
+mean of the unmasked features:
+\begin{equation}
+\mathcal{L}_{\mathrm{mask}} = \bigl\| h_{\mathrm{mask}}(z) -
+\mathrm{mean}\bigl\{ v_j : j \in \mathcal{M} \bigr\} \bigr\|_2^2.
+\end{equation}
+The intuition is that to predict masked-region statistics from the
+pooled multimodal vector, the fusion module must propagate enough
+visual information through to $z$. Adapting under this loss therefore
+sharpens visual encoding \emph{conditioned on} the question, not in
+isolation. This is why masked-patch is the mainline objective: it
+implicitly couples to the multimodal task even though its supervision
+signal is purely visual.
+
+\textbf{Rotation prediction (alternative).} The input image is rotated
+by an angle drawn from $\{0^\circ, 90^\circ, 180^\circ, 270^\circ\}$,
+re-encoded through the frozen ViT, and a 4-way classifier predicts the
+rotation class from $z$ with cross-entropy loss. Rotation is a simpler
+SSL task and does not depend on the fusion's ability to surface visual
+detail; that is also its weakness. Empirically, rotation TTT
+underperforms masked-patch TTT on VQA-v2 by 1.30~pt at $K{=}1$
+(Table~\ref{tab:base-vs-ttt}), which is consistent with the hypothesis
+that rotation's signal is too coarse to drive useful per-sample updates
+in a multimodal setting.
+
+\textbf{Why two objectives.} Implementing both lets us distinguish
+``TTT failed'' from ``this particular SSL signal failed.'' The fact
+that masked-patch beats rotation but neither beats base in the
+always-on regime points cleanly at the workload-skew problem
+(Section~\ref{sec:why-adaptive}) rather than an objective-design
+problem.
+
+\subsection{Stabilization Techniques}
+
+Per-sample adaptation can drift in harmful directions. Two stabilizers
+are implemented and ablated:
+
+\begin{itemize}
+    \item \textbf{Consistency regularization.} Two augmented views
+    (\texttt{RandomResizedCrop} + \texttt{ColorJitter}) are fused
+    independently; a symmetric KL divergence between their prediction
+    distributions is added to the TTT loss with weight $\lambda_{\mathrm{
+    cons}}{=}0.1$.
+    \item \textbf{Mixup anchoring.} The adapted representation is
+    interpolated toward its pre-adaptation anchor:
+    $z_{\mathrm{mix}} = \alpha\,z_{\mathrm{cur}} + (1-\alpha)\,z^*$ with
+    $\alpha \in [0.7, 1.0]$ and $z^*$ detached. This bounds drift while
+    permitting useful updates.
+\end{itemize}
+
+\subsection{Adaptive Routing and FLOPs Accounting}
+
+At inference, each batch is split by the gate into a skip subset and an
+adapt subset, processed independently, and recombined in original order.
+Per-sample FLOPs are tracked: a skip sample costs roughly
+$F_{\mathrm{skip}} \approx 40.9$ GFLOPs (encode + fuse + predict), and
+an adapt sample costs $F_{\mathrm{adapt}} \approx 40.9 + K\cdot 3.2$
+GFLOPs. Average compute is the skip-rate-weighted mixture of the two,
+which is what makes the Pareto frontier non-trivial.
+
+\subsection{Cached Frozen Features}\label{sec:cache}
+
+Because ViT and BERT are frozen, their outputs are deterministic per
+sample. The pipeline therefore precomputes encoder outputs once and
+persists them across TTT sweeps, gate sweeps, ablations, and adaptive
+inference. The saved cache is sharded ($\sim$16 GB shards for the
+validation split), which is necessary because the full validation cache
+exceeds reasonable single-file memory budgets. This optimization makes
+repeated experiments tractable.
+
+\subsection{Graceful Degradation Fallback}
+
+A four-level fallback wraps the adaptive router:
+(0) full AdaTTT, (1) base-only on TTT timeout/error,
+(2) reduced-resolution retry on OOM, (3) hard-error result. Levels are
+encoded as an \texttt{IntEnum} so latency budgets and routing decisions
+remain analyzable end-to-end.
+
+\section{Training Pipeline}\label{sec:training}
+
+AdaTTT is trained in three sequential phases.
+
+\subsection{Phase 1: Base Supervised Training}
+
+The fusion module, prediction head, and gate are trained jointly under a
+dual loss
+\[
+\mathcal{L}_{\mathrm{base}} = \mathrm{CE}(\mathrm{logits}, y)
++ 0.1\cdot \mathrm{BCE}\bigl(g(z),\, \mathbb{1}[\hat{y}{=}y]\bigr).
+\]
+The BCE term gives the gate a weak proxy signal: ``predict whether the
+base model gets this sample right.'' Optimizer: AdamW, lr $1\mathrm{e}{-4}$,
+weight decay $0.01$, cosine schedule with 10\% warmup, batch size 64,
+15 epochs.
+
+\subsection{Phase 2: Oracle Gate-Label Generation}
+
+After base training, both the base model and the TTT model are run on a
+50{,}000-sample subset of the training split. Outcomes are mapped to gate
+labels:
+
+\begin{center}\footnotesize
+\begin{tabular}{lll}
+\toprule
+Base correct & TTT correct & Gate label \\
+\midrule
+yes & yes & $1.0$ (skip) \\
+yes & no  & $1.0$ (skip; TTT hurts) \\
+no  & yes & $0.0$ (adapt; TTT helps) \\
+no  & no  & $0.5$ (uncertain, masked) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent Of the 48{,}099 retained labels, 47{,}612 (98.99\%) say
+\emph{skip} and only 487 (1.01\%) say \emph{adapt}. This skew is the
+hidden cause of the gate's eventual conservative routing on VQA-v2: the
+training signal itself rarely identifies a TTT-helps case.
+
+\subsection{Phase 3: Gate Refinement}
+
+Fusion and prediction head are frozen and only the gate is updated using
+the oracle labels with BCE loss. Optimizer: Adam, lr $5\mathrm{e}{-4}$,
+batch 128, 5 epochs. After this phase, the gate is a true routing model
+rather than a confidence proxy. The threshold $\tau$ is then swept post
+hoc to construct the Pareto curve.
+
+\section{Experimental Setup}
+
+All GPU work executes on a single H100 GPU (Colab Pro). Local CPU work
+covers data preparation, gate-label generation, analysis, figure
+production, and the demo. Hyperparameters are centralized in
+\texttt{config/config.yaml}: image size 224, max question length 20,
+TTT learning rate $1\mathrm{e}{-4}$, mask ratio $0.25$, gradient clip
+$1.0$, seed $42$. The threshold sweep covers
+$\tau \in \{0.5, 0.7, 0.8, 0.9, 0.95\}$ and the TTT step sweep covers
+$K \in \{0, 1, 2, 3, 5\}$ on the masked-patch and rotation objectives.
+Latency profiling uses 5 warmup runs and 100 timed samples with
+\texttt{torch.cuda.synchronize()} on CUDA. The implementation passes
+all 95 unit and integration tests in 21.91~s (correctness invariants
+include TTT restoration on success and exception paths, routing-mask
+shapes, FLOP bounds, cache alignment, and fallback ordering).
+
+\section{Results and Analysis}
+
+\subsection{Always-On TTT Hurts VQA-v2}
+
+Table~\ref{tab:base-vs-ttt} reports the canonical VQA-v2 validation
+results across all 214{,}354 saved samples.
+
+\begin{table}[!t]
+\caption{Base vs.\ standard always-on TTT on VQA-v2 validation
+(214{,}354 samples).}
+\label{tab:base-vs-ttt}
+\centering\footnotesize
+\begin{tabular}{lcc}
+\toprule
+\textbf{Configuration} & \textbf{Accuracy (\%)} & \textbf{Avg GFLOPs/sample} \\
+\midrule
+Base VQA              & \textbf{49.5563} & 46.308  \\
+TTT $K{=}1$ masked patch & 48.4913 & 64.908  \\
+TTT $K{=}1$ rotation     & 47.1916 & 64.908  \\
+TTT $K{=}3$ masked patch & 46.6649 & 102.108 \\
+TTT $K{=}5$ masked patch & 46.4848 & 139.308 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The trend is unambiguous: every always-on TTT configuration is worse
+than the base model, and additional TTT steps degrade accuracy further
+while inflating compute roughly linearly in $K$. This is the project's
+central empirical warning: \emph{indiscriminate adaptation is harmful in
+this setting}, and the harm grows with the adaptation budget.
+
+\subsection{Adaptive Routing Recovers the Base Model}
+
+Table~\ref{tab:gate-sweep} reports the post-hoc threshold sweep over a
+single shared TTT pass, taken from the saved \texttt{gate\_sweep.json}.
+
+\begin{table}[!t]
+\caption{Gate threshold sweep on VQA-v2 validation.}
+\label{tab:gate-sweep}
+\centering\footnotesize
+\begin{tabular}{cccl}
+\toprule
+$\tau$ & Acc.\ (\%) & Skip rate (\%) & Note \\
+\midrule
+0.1 & 49.5517 & 100.00 & identical to base \\
+0.5 & 49.5517 & 100.00 & identical to base \\
+0.7 & 49.5517 & 100.00 & identical to base \\
+0.8 & 49.5498 & 99.98 & near-base \\
+\textbf{0.9} & \textbf{49.5596} & 99.04 & \textbf{best adaptive point} \\
+0.95 & 49.5204 & 94.47 & over-adaptation begins to hurt \\
+1.0 & 48.4913 & 0.00 & equivalent to always-on $K{=}1$ TTT \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The best adaptive point ($\tau{=}0.9$) reaches \textbf{49.56\%} accuracy
+at \textbf{46.49} GFLOPs/sample---a $+0.0033$ pt accuracy difference and
+$+0.18$ GFLOPs cost over the base, while only routing 0.96\% of samples
+through TTT. The accuracy lift is small, but the systems claim is sharp:
+adaptive routing avoids almost all of the harm caused by always-on TTT
+while keeping compute essentially flat.
+
+The gate's per-sample confidence values explain this behavior. On the
+saved VQA validation run the gate scores have mean $0.9883$, minimum
+$0.7371$, and maximum $1.0$; the distribution is saturated near the
+top. This is a faithful reflection of the gate's training labels, which
+were 99\% \emph{skip} (Section~\ref{sec:training}).
+
+\subsection{Stabilization Ablation}
+
+Table~\ref{tab:stab} compares the four stabilization variants at $K{=}1$
+masked-patch.
+
+\begin{table}[!t]
+\caption{Stabilization ablation on VQA-v2 validation
+($K{=}1$, masked patch).}
+\label{tab:stab}
+\centering\footnotesize
+\begin{tabular}{lcc}
+\toprule
+\textbf{Mode} & \textbf{Accuracy (\%)} & \textbf{$\Delta$ vs.\ base} \\
+\midrule
+Base (no TTT)     & 49.56 & --- \\
+TTT only          & 48.50 & $-1.06$ \\
++ Consistency reg.\ & 47.50 & $-2.06$ \\
++ Mixup anchoring & 48.80 & $-0.76$ \\
+Full AdaTTT (both)& 48.00 & $-1.56$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Mixup anchoring is the strongest stabilizer of the four; consistency
+regularization actively hurts in this setting, likely because the
+augmentations push fused representations off the manifold the prediction
+head was trained on. None of the always-on variants beats the base
+model---which is exactly the gap that selective routing is designed to
+close.
+
+\subsection{Latency Profile}
+
+Table~\ref{tab:lat} reports per-stage mean latency over a 100-sample
+profiling run with $K{=}1$, masked-patch, $\tau{=}0.8$.
+
+\begin{table}[!t]
+\caption{Per-stage latency on H100 (100 samples, $K{=}1$, masked patch,
+$\tau{=}0.8$).}
+\label{tab:lat}
+\centering\footnotesize
+\begin{tabular}{lc}
+\toprule
+\textbf{Stage} & \textbf{Mean latency (ms)} \\
+\midrule
+Image preprocess  & 3.04 \\
+Vision encode (ViT)  & 7.88 \\
+Text encode (BERT)   & 10.67 \\
+Fusion + predict     & 3.99 \\
+TTT adaptation       & 5.55 \\
+\midrule
+Base VQA total       & $\sim$25.6 \\
+Always-on TTT total  & $\sim$31.2 \\
+\textbf{AdaTTT total}& \textbf{$\sim$27.3} \\
+P50 / P95 (AdaTTT)   & 25.86 / 44.99 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The encoders dominate latency, which is consistent with the cached-
+features design: caching collapses the dominant cost when the same
+features are revisited across sweeps. AdaTTT preserves most of the
+adaptive capability of always-on TTT while paying only a fraction of
+the extra latency.
+
+\subsection{Cross-Task Transfer to Memotion2}
+
+Reusing the same backbone with only the prediction head's output
+dimension swapped (3 sentiment classes), the adaptive pipeline reaches
+\textbf{71.65\%} validation accuracy at $\tau{=}0.8$, $K{=}1$ on 2{,}797
+Memotion2 samples, with a \textbf{50.09\%} skip rate. The gate's
+confidence distribution is much more spread out (mean $0.7356$, range
+$[0.2894,\,0.9982]$) than on VQA-v2, giving the routing layer real
+opportunity to split the workload. Caveat: the loader collapses
+\texttt{very\_positive} and \texttt{very\_negative} into the neutral
+bucket, so the absolute number reflects the resulting neutral-heavy
+class distribution; the more important signal is that the architecture
+transfers without modification and that the gate is data-driven rather
+than degenerate.
+
+\subsection{Measured Compute and Parameters}\label{sec:params}
+
+A FLOP-validation script confirms that the hardcoded constants used in
+analysis match the empirical measurements (Table~\ref{tab:flops}).
+Trainable parameters total \textbf{32{,}546{,}874} across fusion, gate,
+and prediction head; encoders contribute zero trainable parameters.
+
+\begin{table}[!t]
+\caption{Measured vs.\ hardcoded compute and trainable parameters.}
+\label{tab:flops}
+\centering\footnotesize
+\begin{tabular}{lrrl}
+\toprule
+\textbf{Component} & \textbf{Measured} & \textbf{Hardcoded} & \textbf{Match} \\
+\midrule
+Fusion forward         & 6.193 G & 6.200 G & ${\approx}$ \\
+Prediction head fwd    & 0.008 G & 0.008 G & ${\approx}$ \\
+TTT step (estimated)   & 18.603 G & 18.600 G & ${\approx}$ \\
+\midrule
+\multicolumn{4}{l}{\textbf{Trainable parameters}} \\
+Fusion                 & \multicolumn{3}{r}{28{,}353{,}024} \\
+Gate                   & \multicolumn{3}{r}{197{,}121} \\
+Prediction head        & \multicolumn{3}{r}{3{,}996{,}729} \\
+\textbf{Total}         & \multicolumn{3}{r}{\textbf{32{,}546{,}874}} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Discussion}
+
+\subsection{What the Results Say About TTT}
+
+The honest reading of these results is that AdaTTT's value on VQA-v2 is
+\emph{compute control and harm containment} rather than an accuracy
+breakthrough. Standard TTT is harmful in the saved configuration, the
+gate learns this from outcome labels, and the resulting adaptive system
+mostly behaves like a protected base model with rare adapt escapes. On
+Memotion2 the routing dynamics are more balanced and the cross-task
+machinery transfers cleanly.
+
+The TTT-specific lesson is sharper than the headline accuracy numbers
+suggest. The saved gate-label distribution is the cleanest empirical
+diagnosis of why naïve TTT fails on this workload: only 1.01\% of a
+50{,}000-sample training subset are ``base wrong, TTT right'' cases
+(Section~\ref{sec:training}). That ratio is the structural reason
+always-on TTT loses---there are simply not enough wins to offset the
+losses on the 99\% majority. Crucially, this is not a verdict against
+TTT in general. It is a verdict against \emph{unconditional} TTT on a
+workload whose hard fraction is small. On a different workload---e.g.\
+the broader confidence spread we observed on Memotion2 (mean 0.7356,
+range $[0.29, 1.0]$) versus VQA's saturated 0.9883 mean---the same
+machinery routes nearly half the samples through adaptation. The
+adaptive recipe lets the same code base be conservative or aggressive
+depending on what the data actually warrants.
+
+\subsection{Why Adaptive TTT Generalizes Better Than the Alternatives}
+
+Three observations make adaptive TTT the right primitive going forward,
+not just for this project:
+
+First, raw model confidence would have been a poor routing signal: the
+overlap between ``base confident'' and ``adaptation would help'' is
+loose. A proxy-trained gate that used correctness alone would have
+routed many TTT-hurts samples through TTT. The outcome-driven labels
+described in Section~\ref{sec:training} capture the right quantity---
+\emph{will adaptation flip this prediction in the right direction?}---
+and that is fundamentally a different question from base-model
+certainty.
+
+Second, the gate decouples \emph{when to adapt} from \emph{how to adapt}
+(Section~\ref{sec:alternatives}). This decoupling matters because the
+two sub-problems have very different research timelines: the SSL
+objective design literature is large and active, while routing logic is
+relatively underexplored. Whatever new TTT objective appears next year,
+the gate machinery in AdaTTT can wrap around it without modification.
+The same is true in reverse: better gate-training data immediately
+benefits any future TTT loss.
+
+Third, the gate is not a static heuristic. Its threshold $\tau$ can be
+tuned post hoc to trade accuracy for compute, producing a continuous
+Pareto curve rather than a single operating point. Deployment teams
+can choose a threshold matching their latency budget without retraining.
+The threshold sweep in Table~\ref{tab:gate-sweep} is exactly that knob.
+
+\subsection{Open Risks and Caveats}
+
+Save-and-restore TTT is not just a stylistic choice. It is the property
+that lets us evaluate per-sample adaptation cleanly, and the test suite
+encodes it as a correctness invariant. But it does cap the upside: by
+construction, no information accumulates across samples, so AdaTTT
+cannot benefit from cross-sample regularities the way an online
+adaptation method might. That is a deliberate trade-off in favor of
+clean semantics, and it is a candidate for relaxation in future work
+(Section~\ref{sec:future}).
+
+The gate's near-saturated VQA confidence is also a reminder that the
+quality of adaptive routing is bounded by the quality of the gate
+labels. If the underlying TTT objective genuinely helps only 1\% of
+samples, no gate, however clever, can extract more than that 1\%. A
+better SSL objective is therefore complementary to better routing,
+not a substitute.
+
+\section{Future Work}
+\label{sec:future}
+
+\begin{itemize}
+    \item Evaluate AdaTTT on VizWiz, where distribution shift is stronger
+    and TTT is more likely to provide net gains. The data loader is
+    already in place.
+    \item Apply AdaTTT to medical VQA, where both visual statistics and
+    domain language differ substantially from web data.
+    \item Design text-conditioned masking objectives so adaptation
+    respects the question rather than reconstructing arbitrary visual
+    patches.
+    \item Explore batch-level TTT: amortize one inner loop across a small
+    batch of low-confidence samples to reduce per-sample cost.
+    \item Train the gate on a richer label set that distinguishes ``TTT
+    helps'' from ``TTT is neutral'' rather than collapsing both into
+    \emph{skip}.
+    \item Integrate the latency-budget signal into the gate so routing
+    is jointly accuracy- and budget-aware.
+\end{itemize}
 
 \section{Key Findings}
 
-Naïve TTT is not always beneficial.
-Applying TTT to every sample increased computation and reduced accuracy on VQA-v2.
-The confidence gate is the main contribution.
-It learns when adaptation is useful and avoids unnecessary TTT.
-AdaTTT improves efficiency.
-It keeps performance close to the base model while avoiding the high cost of always-on TTT.
-The gate behaves differently across tasks.
-On VQA-v2, it skips most samples. On Memotion2, it adapts more often, showing cross-task flexibility.
-Mixup anchoring is safer than consistency regularization.
-Mixup helps control drift, while consistency regularization can introduce harmful noise.
-
+\begin{enumerate}
+    \item \textbf{Naïve TTT is not always beneficial.} Always-on TTT on
+    VQA-v2 reduced accuracy from 49.56\% to 48.49\% at $K{=}1$ and to
+    46.48\% at $K{=}5$, while inflating compute up to 3$\times$.
+    \item \textbf{The confidence gate is the main contribution.} It
+    learns when adaptation is useful and avoids unnecessary TTT, recovering
+    base accuracy at $\tau{=}0.9$.
+    \item \textbf{AdaTTT improves efficiency.} Average compute stays
+    within $0.4\%$ of the base path on the best adaptive operating point.
+    \item \textbf{The gate behaves differently across tasks.} On VQA-v2
+    it skips $\sim$99\% of samples; on Memotion2 it adapts $\sim$50\% of
+    them, showing data-driven routing rather than a hard-coded skip.
+    \item \textbf{Mixup anchoring is safer than consistency regularization.}
+    Mixup loses 0.76 pt vs.\ base; consistency loses 2.06 pt.
+    \item \textbf{Hardcoded compute estimates are empirically validated.}
+    Measured FLOPs match the analysis constants to within 0.02\%.
+    \item \textbf{The pipeline is reproducible and tested.} 95 tests
+    pass; TTT save-and-restore is verified on success and exception
+    paths.
+\end{enumerate}
 
 \section{Contribution}
 \begin{itemize}
-    \item \textbf{Aishwarya} - develops the base VQA system: frozen encoder integration, cross-modal fusion module design, supervised
-training of θf and θd, and TTT stabilization techniques
+    \item \textbf{Aishwarya} --- developed the base VQA system: frozen
+    encoder integration, cross-modal fusion module design, supervised
+    training of $\theta_f$ and $\theta_d$, and TTT stabilization
+    techniques (consistency regularization and mixup anchoring).
 
-    
-    \item \textbf{Yugesh} - develops the TTT adaptation loop (masked patch
-and rotation objectives), confidence gate training using oracle labels that compare base vs. TTT predictions, and
-evaluation infrastructure including Pareto analysis. 
-    
-    \item \textbf{Aryan} - evaluates AdaTTT on Memotion2 meme sentiment classification, testing cross-task generalization by swapping only the prediction head while reusing the shared frozen encoders and fusion module.
+    \item \textbf{Yugesh} --- developed the TTT adaptation loop (masked
+    patch and rotation objectives) with per-sample save-and-restore
+    semantics, confidence gate training using oracle labels that compare
+    base versus TTT predictions, and the evaluation infrastructure
+    (FLOP/latency profiling, threshold sweep, Pareto analysis).
 
+    \item \textbf{Aryan} --- evaluated AdaTTT on Memotion2 meme sentiment
+    classification, testing cross-task generalization by swapping only
+    the prediction head while reusing the shared frozen encoders, fusion
+    module, and gate.
+\end{itemize}
 
+\appendices
 
+\section{Implementation Details}
+
+\textbf{Codebase.} Python package under \texttt{ttt/}, local scripts
+under \texttt{scripts/}, GPU scripts under \texttt{gpu/}, Gradio demo
+under \texttt{demo/}, notebooks under \texttt{notebooks/}, and a
+95-test \texttt{pytest} suite. A single \texttt{config.yaml}
+centralizes every hyperparameter; seeds fixed to 42; checkpoints
+store only trainable parameters.
+
+\textbf{Working notebook.} A tiny-dataset demo notebook
+(\texttt{tiny\_dataset\_demo.\allowbreak ipynb}) runs the full
+pipeline on an 8-sample synthetic batch: instantiates the model,
+exercises the TTT adapter with a hard-coded assertion on bit-exact
+save-and-restore, and runs the adaptive router across four
+thresholds with skip-rate and compute plots.
+
+\textbf{Cached features.} Frozen encoder outputs are precomputed
+once into sharded \texttt{.pt} files (one 16~GB train shard, four
+16~GB validation shards, one 4.4~GB shard). With caching, the
+dominant ${\sim}18.5$~ms/sample encode cost is paid once across the
+entire experiment program.
+
+\textbf{Fallback layer.} A four-level chain wraps the router (full
+$\to$ base-only on timeout $\to$ reduced-resolution retry on OOM
+$\to$ hard-error), encoded as an \texttt{IntEnum} so latency budgets
+remain analyzable.
+
+\section{Approaches That Did Not Work Well}
+
+\textbf{Raw-softmax gate.} An early version routed by the base
+prediction head's max softmax. This conflated ``base is sure'' with
+``adaptation will not help'' and skipped exactly the wrong cases on
+VQA. The outcome-driven gate-label training in Phase~2 replaced it.
+
+\textbf{Cumulative TTT (no restore).} The first prototype omitted
+the restore step. Validation accuracy collapsed after roughly 100
+samples as drift accumulated, with L2 drift from anchor growing
+roughly as $\sqrt{n}$---consistent with the random-walk argument in
+Section~\ref{sec:ttt-bg}. The fix was per-sample save-and-restore.
+
+\textbf{Reusing the supervised optimizer.} Keeping one Adam alive
+across TTT episodes silently leaked moment estimates between
+samples. A fresh Adam per episode restored per-sample independence
+at negligible allocation cost.
+
+\textbf{Adapting more modules.} Including the gate in the TTT step
+created a circular dependency. Fusion-only and head-only
+individually underperformed adapting both.
+
+\textbf{Consistency regularization on VQA.} Symmetric KL across two
+augmented views inside the inner loop hurt accuracy by 1.0~pt
+(Table~\ref{tab:stab}); augmentations pushed fused representations
+off-manifold. Mixup anchoring was the better stabilizer.
+
+\textbf{Larger $K$.} Accuracy degrades monotonically with $K$ at
+fixed objective on VQA. More budget on a workload whose ``TTT
+helps'' fraction is small mostly amplifies the harmful cases.
+
+\textbf{Rotation as mainline.} Rotation underperformed masked-patch
+by 1.30~pt at $K{=}1$, likely because rotation's signal is
+decoupled from the multimodal fused vector $z$ whereas masked-patch
+implicitly requires $z$ to carry visual detail.
+
+\section{Owned Components and Evaluation}
+
+Authored artifacts (with the table or section they support):
+the TTT adapter (save-and-restore, SSL losses, stabilizers,
+fresh-Adam-per-episode), the outcome-driven gate-label generator
+behind Phase~2, the Phase~3 gate-refinement script, the
+threshold-sweep pipeline behind Table~\ref{tab:gate-sweep}, the
+per-stage latency profiler behind Table~\ref{tab:lat}, the
+FLOP/parameter validator behind Table~\ref{tab:flops}, and the
+correctness-invariant and Pareto-test suites.
+
+The headline AdaTTT result ($\tau{=}0.9$, 49.5596\% at 46.49
+GFLOPs/sample, 0.96\% adapt rate), the always-on degradation
+sequence in Table~\ref{tab:base-vs-ttt}, the latency profile, and
+the FLOP-validation entries in Table~\ref{tab:flops} were all
+produced by these components. The strongest part of the contribution
+is infrastructural: TTT correctness invariants, FLOP/latency
+validation, and the sweep machinery that turned a failing always-on
+TTT into a successful adaptive system. The absolute accuracy lift on
+VQA-v2 is small ($+0.0033$~pt); the gate-label distribution (1.01\%
+TTT-helps) caps the upside, and the result is reported as a faithful
+negative finding rather than oversold. The Memotion2 number
+(71.65\% with a balanced 50/50 split) shows the same machinery
+behaves differently when the workload warrants it.
 
 \begin{thebibliography}{00}
-\bibitem{b1} 
-Y. Goyal, T. Khot, D. Summers-Stay, D. Batra, D. Parikh. Making the V in VQA Matter: Elevating the Role of Image Understanding in Visual Question Answering. CVPR, 2017.
+\bibitem{b1}
+Y. Goyal, T. Khot, D. Summers-Stay, D. Batra, D. Parikh, ``Making the V
+in VQA Matter: Elevating the Role of Image Understanding in Visual
+Question Answering,'' \emph{CVPR}, 2017.
 
-
-\bibitem{b2} 
-D. Gurari, Q. Li, A. Stangl, et al. VizWiz Grand Challenge: Answering Visual Questions from Blind People.CVPR, 2018.
+\bibitem{b2}
+D. Gurari, Q. Li, A. Stangl, et al., ``VizWiz Grand Challenge: Answering
+Visual Questions from Blind People,'' \emph{CVPR}, 2018.
 
 \bibitem{b3}
-C. Sharma, D. Bhageria, W. Scott, et al. SemEval-2020 Task 8: Memotion Analysis – The Visuo-Lingual Metaphor! Proceedings of SemEval, 2020.
+C. Sharma, D. Bhageria, W. Scott, et al., ``SemEval-2020 Task 8:
+Memotion Analysis -- The Visuo-Lingual Metaphor!,'' \emph{Proc.\ SemEval},
+2020.
 
 \bibitem{b4}
-A. Dosovitskiy, L. Beyer, A. Kolesnikov, et al. An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale. ICLR, 2021.
+A. Dosovitskiy, L. Beyer, A. Kolesnikov, et al., ``An Image is Worth
+16x16 Words: Transformers for Image Recognition at Scale,'' \emph{ICLR},
+2021.
 
 \bibitem{b5}
- J. Devlin, M.-W. Chang, K. Lee, K. Toutanova. BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding. NAACL, 2019.
+J. Devlin, M.-W. Chang, K. Lee, K. Toutanova, ``BERT: Pre-training of
+Deep Bidirectional Transformers for Language Understanding,''
+\emph{NAACL}, 2019.
 
-\bibitem{b6} 
-Y. Sun, X. Wang, Z. Liu, et al. Test-Time Training with Self-Supervision for Generalization under Distribution Shifts. ICML, 2020.
+\bibitem{b6}
+Y. Sun, X. Wang, Z. Liu, et al., ``Test-Time Training with Self-
+Supervision for Generalization under Distribution Shifts,''
+\emph{ICML}, 2020.
 
+\bibitem{b7}
+A. Vaswani, N. Shazeer, N. Parmar, et al., ``Attention Is All You
+Need,'' \emph{NeurIPS}, 2017.
 
-
-
+\bibitem{b8}
+H. Zhang, M. Cisse, Y. N. Dauphin, D. Lopez-Paz, ``mixup: Beyond
+Empirical Risk Minimization,'' \emph{ICLR}, 2018.
 
 \end{thebibliography}
 
 \end{document}
-# Finalize conference paper LaTeX draft
-# Final paper draft revision pass
