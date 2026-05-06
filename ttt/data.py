@@ -151,6 +151,7 @@ class VQADataset(Dataset):
         """
         self.image_dir = image_dir
         self.answer_vocab = answer_vocab
+        self.num_answers = len(answer_vocab)
         self.max_question_length = max_question_length
         self.image_size = image_size
         self.split = split
@@ -181,12 +182,23 @@ class VQADataset(Dataset):
             if question_info is None:
                 continue
 
-            # Most frequent answer (mode answer)
+            # Count how many of the 10 annotators gave each answer
             answer_counts: Counter = Counter()
             for ans in ann["answers"]:
                 answer_counts[ans["answer"]] += 1
+
+            # Mode answer (most frequent) — still used for hard accuracy eval
             mode_answer = answer_counts.most_common(1)[0][0]
             answer_idx = self.answer_vocab.get(mode_answer, 0)  # 0 = <UNK>
+
+            # Soft answer scores: min(count / 3, 1.0) per the official VQA metric.
+            # This gives partial credit when multiple annotators agree and provides
+            # a much richer training signal than hard one-hot labels.
+            answer_scores = torch.zeros(self.num_answers)
+            for ans_text, count in answer_counts.items():
+                idx = self.answer_vocab.get(ans_text, 0)
+                answer_scores[idx] += count
+            answer_scores = torch.clamp(answer_scores / 3.0, max=1.0)
 
             # Question type
             question_type = ann.get("answer_type", "other")
@@ -200,6 +212,7 @@ class VQADataset(Dataset):
                 "image_path": image_path,
                 "question": question_info["question"],
                 "answer_idx": answer_idx,
+                "answer_scores": answer_scores,
                 "question_type": question_type,
                 "sample_id": str(qid),
             })
@@ -238,6 +251,7 @@ class VQADataset(Dataset):
             "input_ids": input_ids,
             "attention_mask": attention_mask,
             "answer_idx": sample["answer_idx"],
+            "answer_scores": sample["answer_scores"],
             "question_type": sample["question_type"],
             "sample_id": sample["sample_id"],
         }
@@ -373,7 +387,7 @@ def vqa_collate_fn(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
     question_types = [s["question_type"] for s in batch]
     sample_ids = [s["sample_id"] for s in batch]
 
-    return {
+    result = {
         "images": images,
         "input_ids": input_ids,
         "attention_mask": attention_mask,
@@ -381,6 +395,12 @@ def vqa_collate_fn(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
         "question_types": question_types,
         "sample_ids": sample_ids,
     }
+
+    # Include soft answer scores when available (VQA-v2 datasets)
+    if "answer_scores" in batch[0]:
+        result["answer_scores"] = torch.stack([s["answer_scores"] for s in batch])
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -826,9 +846,3 @@ def download_memotion2(data_dir: str) -> None:
     print("Annotation JSON format (list of dicts):")
     print('  [{"image": "img_001.jpg", "text": "OCR text", "sentiment": "positive"}, ...]')
     print("=" * 60)
-# Add VQA-v2 open-ended question validation
-# Implement cached features dataset loader
-# Integrate feature shards into data module
-# Align Memotion2 JSON keys with new data schema
-# Add Memotion raw loader integration
-# Final data module cleanup and docstrings
