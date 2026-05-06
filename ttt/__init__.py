@@ -9,6 +9,7 @@ from ttt.models import (
     FullVQAModel,
     FusionModule,
     ConfidenceGate,
+    EntropyGate,
     PredictionHead,
     MaskedPatchProjection,
     RotationHead,
@@ -28,6 +29,7 @@ from ttt.data import (
 from ttt.metrics import (
     bootstrap_confidence_interval,
     vqa_accuracy,
+    vqa_accuracy_soft,
     accuracy_by_question_type,
     pareto_frontier,
     compute_gate_statistics,
@@ -51,8 +53,9 @@ __version__ = "0.1.0"
 
 __all__ = [
     # Models
-    "FullVQAModel", "FusionModule", "ConfidenceGate", "PredictionHead",
-    "MaskedPatchProjection", "RotationHead", "load_frozen_vit", "load_frozen_bert",
+    "FullVQAModel", "FusionModule", "ConfidenceGate", "EntropyGate",
+    "PredictionHead", "MaskedPatchProjection", "RotationHead",
+    "load_frozen_vit", "load_frozen_bert",
     # TTT
     "TTTAdapter",
     # Gate / Router
@@ -66,10 +69,9 @@ __all__ = [
     "build_memotion2_label_map", "cached_vqa_collate_fn",
     # Metrics
     "bootstrap_confidence_interval",
-    "vqa_accuracy", "accuracy_by_question_type", "pareto_frontier",
-    "compute_gate_statistics", "mcnemar_test",
+    "vqa_accuracy", "vqa_accuracy_soft", "accuracy_by_question_type",
+    "pareto_frontier", "compute_gate_statistics", "mcnemar_test",
     # Utils
     "load_config", "save_json", "load_json", "save_checkpoint", "load_checkpoint",
     "setup_logging", "get_device", "count_parameters", "set_seed",
 ]
-# Clean up __init__ exports in ttt package
