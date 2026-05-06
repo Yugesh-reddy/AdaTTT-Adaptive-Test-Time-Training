@@ -75,6 +75,39 @@ def vqa_accuracy(
     return correct / len(predictions)
 
 
+def vqa_accuracy_soft(
+    predictions: List[int],
+    answer_scores_list: List[List[float]],
+) -> float:
+    """Official VQA accuracy metric using soft answer scores.
+
+    For each question, VQA-v2 provides 10 human answers. The official
+    accuracy for a predicted answer a is:
+        acc(a) = min(#humans_who_said_a / 3, 1)
+
+    This gives partial credit when the predicted answer matches some
+    but not all annotators, and caps at 1.0 when ≥3 annotators agree.
+
+    Args:
+        predictions: List of predicted answer indices.
+        answer_scores_list: List of soft score vectors (one per sample).
+            Each vector has shape (num_answers,) with values in [0, 1].
+
+    Returns:
+        Average soft accuracy in [0, 1].
+    """
+    if len(predictions) == 0:
+        return 0.0
+    total_score = 0.0
+    for pred_idx, scores in zip(predictions, answer_scores_list):
+        if isinstance(scores, (list, tuple)):
+            total_score += scores[pred_idx] if pred_idx < len(scores) else 0.0
+        else:
+            # Handle torch.Tensor or numpy array
+            total_score += float(scores[pred_idx]) if pred_idx < len(scores) else 0.0
+    return total_score / len(predictions)
+
+
 def accuracy_by_question_type(
     predictions: List[int],
     ground_truth: List[int],
@@ -260,7 +293,3 @@ def mcnemar_test(
         "p_value": float(p_value),
         "significant_at_005": p_value < 0.05,
     }
-# Fix metrics computation for VizWiz answers
-# Fix figure confidence scatter annotation offsets
-# Update analysis summary with final numbers
-# Final metrics module cleanup
