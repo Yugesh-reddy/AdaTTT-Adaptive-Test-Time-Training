@@ -155,23 +155,40 @@ class FusionLayer(nn.Module):
 class FusionModule(nn.Module):
     """Cross-modal fusion via bidirectional cross-attention.
 
-    Stacks `num_layers` FusionLayers, then pools the visual stream
-    to produce a single fused vector z ∈ R^(768).
+    Stacks `num_layers` FusionLayers, then uses learned query tokens with
+    cross-attention pooling to produce a fused vector z ∈ R^(768).
 
-    Parameters: θ_f (~4.7M params for 2 layers)
+    The query-based pooling (inspired by Q-Former in BLIP-2) replaces simple
+    CLS-token pooling, enabling the model to attend to different spatial
+    regions and semantic aspects of the fused representation.
+
+    Parameters: θ_f (~14M params for 6 layers + 32 query tokens)
     """
 
     def __init__(
         self,
         dim: int = 768,
         num_heads: int = 12,
-        num_layers: int = 2,
-        dropout: float = 0.1,
+        num_layers: int = 6,
+        dropout: float = 0.15,
+        num_query_tokens: int = 32,
     ):
         super().__init__()
         self.layers = nn.ModuleList(
             [FusionLayer(dim, num_heads, dropout) for _ in range(num_layers)]
         )
+
+        # Learned query tokens for attention-weighted pooling.
+        # These attend to the fused visual sequence and aggregate information
+        # from multiple spatial locations, improving grounding for spatial
+        # and counting questions.
+        self.num_query_tokens = num_query_tokens
+        self.query_tokens = nn.Parameter(torch.randn(1, num_query_tokens, dim) * 0.02)
+        self.query_attn = CrossAttention(dim, num_heads, dropout)
+        self.query_norm = nn.LayerNorm(dim)
+
+        # Project aggregated queries to a single vector
+        self.pool_proj = nn.Linear(num_query_tokens * dim, dim)
         self.pool_norm = nn.LayerNorm(dim)
 
     def forward(
@@ -199,8 +216,16 @@ class FusionModule(nn.Module):
         if return_sequence:
             return v
 
-        # Pool: use CLS token (index 0)
-        z = self.pool_norm(v[:, 0, :])
+        # Query-based pooling: learned queries attend to fused visual tokens
+        B = v.shape[0]
+        queries = self.query_tokens.expand(B, -1, -1)  # (B, num_queries, D)
+        pooled = self.query_attn(queries, v, v)  # (B, num_queries, D)
+        pooled = self.query_norm(pooled)
+
+        # Flatten and project to single vector
+        z = pooled.reshape(B, -1)  # (B, num_queries * D)
+        z = self.pool_proj(z)  # (B, D)
+        z = self.pool_norm(z)
         return z
 
 
@@ -251,6 +276,53 @@ class ConfidenceGate(nn.Module):
         return confidence.squeeze(-1) > threshold
 
 
+class EntropyGate(nn.Module):
+    """Training-free gate based on prediction entropy.
+
+    Uses the entropy of the prediction distribution as a confidence signal:
+        - Low entropy → confident prediction → SKIP TTT
+        - High entropy → uncertain prediction → APPLY TTT
+
+    This eliminates the need for supervised gate training (no gate labels,
+    no separate training pipeline). It provides a principled, unsupervised
+    baseline that can be compared against the learned ConfidenceGate.
+
+    Parameters: 0 (no trainable parameters)
+    """
+
+    def __init__(self, num_answers: int = 3129):
+        super().__init__()
+        self.max_entropy = math.log(num_answers)
+
+    def forward(self, logits: torch.Tensor) -> torch.Tensor:
+        """Compute confidence from prediction entropy.
+
+        Args:
+            logits: (B, num_answers) — raw prediction logits.
+
+        Returns:
+            confidence: (B, 1) — values in [0, 1].
+            High confidence → SKIP TTT. Low confidence → APPLY TTT.
+        """
+        probs = F.softmax(logits, dim=-1)
+        entropy = -(probs * torch.log(probs + 1e-8)).sum(dim=-1, keepdim=True)
+        confidence = 1.0 - (entropy / self.max_entropy)
+        return confidence
+
+    def route(self, logits: torch.Tensor, threshold: float) -> torch.Tensor:
+        """Determine which samples skip TTT based on entropy.
+
+        Args:
+            logits: (B, num_answers) — raw prediction logits.
+            threshold: Gate threshold τ.
+
+        Returns:
+            mask: (B,) — True = SKIP TTT, False = APPLY TTT.
+        """
+        confidence = self.forward(logits)
+        return confidence.squeeze(-1) > threshold
+
+
 # ---------------------------------------------------------------------------
 # PredictionHead
 # ---------------------------------------------------------------------------
@@ -259,21 +331,28 @@ class ConfidenceGate(nn.Module):
 class PredictionHead(nn.Module):
     """MLP that maps fused representation to answer logits.
 
-    Architecture: Linear(768, hidden) → ReLU → Dropout → LayerNorm → Linear(hidden, num_answers)
-    Parameters: θ_d (~2.3M params for num_answers=3129)
+    Architecture: Linear → GELU → Dropout → LayerNorm → Linear → GELU → Dropout → LayerNorm → Linear
+    Uses GELU activation (standard for transformer-based models) and an extra
+    hidden layer for improved representational capacity on the 3129-class VQA task.
+
+    Parameters: θ_d (~5.9M params for hidden_dim=1536, num_answers=3129)
     """
 
     def __init__(
         self,
         input_dim: int = 768,
-        hidden_dim: int = 1024,
+        hidden_dim: int = 1536,
         num_answers: int = 3129,
         dropout: float = 0.2,
     ):
         super().__init__()
         self.classifier = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.LayerNorm(hidden_dim),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.GELU(),
             nn.Dropout(dropout),
             nn.LayerNorm(hidden_dim),
             nn.Linear(hidden_dim, num_answers),
@@ -394,8 +473,12 @@ class FullVQAModel(nn.Module):
         self.bert = None
 
         # Trainable components
-        self.fusion = FusionModule(dim, num_heads, num_layers, dropout)
+        self.fusion = FusionModule(
+            dim, num_heads, num_layers, dropout,
+            num_query_tokens=config.get("num_query_tokens", 32),
+        )
         self.gate = ConfidenceGate(dim, gate_hidden, dropout)
+        self.entropy_gate = EntropyGate(num_answers)
         self.prediction_head = PredictionHead(dim, pred_hidden, num_answers)
 
         # TTT auxiliary heads
@@ -572,6 +655,3 @@ class FullVQAModel(nn.Module):
             for name, param in module.named_parameters():
                 params.append((f"{module_name}.{name}", param))
         return params
-# Optimize model forward pass memory usage
-# Update adaptive router for feature-based prediction
-# Final models cleanup and type hints
