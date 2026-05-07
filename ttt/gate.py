@@ -45,6 +45,7 @@ class AdaptiveRouter:
         ttt_adapter: Any,
         threshold: float = 0.8,
         use_amp: bool = False,
+        gate_type: str = "learned",
     ):
         """
         Args:
@@ -52,11 +53,15 @@ class AdaptiveRouter:
             ttt_adapter: TTTAdapter instance.
             threshold: Gate threshold τ. High confidence > τ → SKIP.
             use_amp: Enable mixed precision for encoding.
+            gate_type: "learned" (supervised ConfidenceGate) or "entropy"
+                (training-free EntropyGate). Entropy gate uses prediction
+                distribution entropy — no gate training required.
         """
         self.model = model
         self.ttt_adapter = ttt_adapter
         self.threshold = threshold
         self.use_amp = use_amp
+        self.gate_type = gate_type
 
     def predict(
         self,
@@ -125,8 +130,16 @@ class AdaptiveRouter:
         # 2. Fuse → z for ALL samples
         z = self.model.fusion(visual_tokens.float(), text_tokens.float(), attention_mask)
 
-        # 3. Gate confidence
-        confidence = self.model.gate(z)  # (B, 1)
+        # 3. Gate confidence — route via learned gate or entropy gate
+        if self.gate_type == "entropy":
+            # Entropy gate: needs logits first, then decides
+            logits = self.model.prediction_head(z)
+            confidence = self.model.entropy_gate(logits)  # (B, 1)
+        else:
+            # Learned gate: uses fused representation directly
+            confidence = self.model.gate(z)  # (B, 1)
+            logits = self.model.prediction_head(z)
+
         conf_values = confidence.squeeze(-1)  # (B,)
         skip_mask = conf_values > self.threshold  # True = SKIP
 
@@ -139,9 +152,13 @@ class AdaptiveRouter:
         # 4a. Process SKIP samples (base prediction, no TTT)
         if skip_count > 0:
             skip_idx = skip_mask.nonzero(as_tuple=True)[0]
-            skip_z = z[skip_idx]
-            skip_logits = self.model.prediction_head(skip_z)
-            all_logits[skip_idx] = skip_logits
+            if self.gate_type == "entropy":
+                # Logits already computed above
+                all_logits[skip_idx] = logits[skip_idx]
+            else:
+                skip_z = z[skip_idx]
+                skip_logits = self.model.prediction_head(skip_z)
+                all_logits[skip_idx] = skip_logits
 
         # 4b. Process ADAPT samples (TTT adaptation)
         if adapt_count > 0:
@@ -200,7 +217,3 @@ class AdaptiveRouter:
         total_flops = n_skip * self.SKIP_FLOPS + n_adapt * adapt_flops
 
         return (total_flops / total) / 1e9  # Convert to GFLOPs
-# Tune confidence threshold in gate module
-# Tighten confidence gate threshold sweep bounds
-# Final gate module cleanup and docstrings
-# Update figure 03 gate sweep color scheme
