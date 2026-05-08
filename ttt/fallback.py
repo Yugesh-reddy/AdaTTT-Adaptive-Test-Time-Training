@@ -208,6 +208,3 @@ class GracefulPredictor:
             reason=f"all fallback levels exhausted",
             latency_ms=total_ms,
         )
-# Refactor fallback logic for cleaner API
-# Fix fallback NaN confidence handling
-# Final fallback module cleanup
