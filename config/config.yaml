@@ -9,13 +9,14 @@ fallback_reduced_resolution: 160
 fallback_ttt_timeout_ms: 500
 figures_dir: figures/
 fusion_dim: 768
-fusion_dropout: 0.1
+fusion_dropout: 0.15
 fusion_heads: 12
-fusion_layers: 2
+fusion_layers: 6
 gate_batch_size: 128
 gate_epochs: 5
 gate_hidden: 256
 gate_lr: 0.0005
+gate_type: learned
 gate_threshold_sweep:
 - 0.5
 - 0.7
@@ -33,14 +34,16 @@ mixup_alpha_range:
 - 0.7
 - 1.0
 num_answers: 3129
-prediction_hidden: 1024
+num_query_tokens: 32
+prediction_hidden: 1536
 results_dir: results/
 seed: 42
 strict_images: true
 text_encoder: bert-base-uncased
-train_batch_size: 64
-train_epochs: 15
-train_lr: 0.0001
+train_batch_size: 32
+train_epochs: 25
+train_lr: 5e-5
+train_loss: soft_bce
 train_optimizer: adamw
 train_scheduler: cosine
 train_split: train
@@ -61,7 +64,6 @@ ttt_mask_ratio: 0.25
 ttt_objectives:
 - masked_patch
 - rotation
+- contrastive
 val_split: val
 vision_encoder: google/vit-base-patch16-224
-# Update config: add warmup_steps and lr_decay
-# Final config.yaml cleanup
