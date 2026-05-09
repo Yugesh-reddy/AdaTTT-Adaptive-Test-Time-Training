@@ -137,6 +137,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-# Fix token limit issue in data prep script
-# Add COCO data download references to prep script
-# Add question data download helper
+
