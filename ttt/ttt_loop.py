@@ -172,6 +172,8 @@ class TTTAdapter:
                     loss = self.masked_patch_loss(visual_tokens, text_tokens, text_mask)
                 elif self.objective == "rotation":
                     loss = self.rotation_loss(images, text_tokens, text_mask)
+                elif self.objective == "contrastive":
+                    loss = self.contrastive_loss(visual_tokens, text_tokens, text_mask)
                 else:
                     raise ValueError(f"Unknown TTT objective: {self.objective}")
 
@@ -394,6 +396,58 @@ class TTTAdapter:
         alpha_lo, alpha_hi = self.mixup_alpha_range
         alpha = random.uniform(alpha_lo, alpha_hi)
         return alpha * z_current + (1 - alpha) * z_anchor.detach()
-# Fix edge case in TTT loop gradient accumulation
-# Update colab runner with cached features workflow
-# Final TTT loop cleanup and comments
+
+    def contrastive_loss(
+        self,
+        visual_tokens: torch.Tensor,
+        text_tokens: torch.Tensor,
+        text_mask: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Cross-modal contrastive objective for TTT.
+
+        Creates negative pairs by rolling text tokens within the batch,
+        then trains the model to distinguish correct image-question pairings
+        from incorrect ones. This is a stronger TTT signal than masked patch
+        prediction because it directly operates on the question-visual
+        alignment that VQA accuracy depends on.
+
+        For batch size 1 (typical in TTT), we create a negative by zeroing
+        out the text tokens to simulate a missing-question condition.
+
+        Args:
+            visual_tokens: (B, 197, 768) — pre-encoded from frozen ViT.
+            text_tokens: (B, L, 768) — pre-encoded from frozen BERT.
+            text_mask: (B, L) — attention mask for text.
+
+        Returns:
+            Scalar contrastive loss.
+        """
+        B = visual_tokens.shape[0]
+
+        # Positive pair: correct image-question fusion
+        z_pos = self.model.fusion(visual_tokens, text_tokens, text_mask)
+
+        # Negative pair: mismatched text
+        if B > 1:
+            # Roll text tokens to create mismatched pairs
+            text_neg = torch.roll(text_tokens, 1, dims=0)
+            mask_neg = torch.roll(text_mask, 1, dims=0) if text_mask is not None else None
+        else:
+            # Single sample: use zeroed text as negative
+            text_neg = torch.zeros_like(text_tokens)
+            mask_neg = torch.zeros_like(text_mask) if text_mask is not None else None
+
+        z_neg = self.model.fusion(visual_tokens, text_neg, mask_neg)
+
+        # Use the gate as a binary discriminator: correct pairing should
+        # get high confidence, incorrect should get low confidence
+        conf_pos = self.model.gate(z_pos)  # (B, 1)
+        conf_neg = self.model.gate(z_neg)  # (B, 1)
+
+        logits = torch.cat([conf_pos, conf_neg], dim=0).squeeze(-1)
+        labels = torch.cat([
+            torch.ones(B, device=visual_tokens.device),
+            torch.zeros(B, device=visual_tokens.device),
+        ])
+
+        return F.binary_cross_entropy(logits, labels)
