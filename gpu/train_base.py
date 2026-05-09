@@ -71,13 +71,17 @@ def evaluate(model, val_loader, device, use_amp=False):
 
             # Save predictions
             for i in range(answers.size(0)):
-                all_predictions.append({
+                pred_entry = {
                     "sample_id": batch["sample_ids"][i],
                     "prediction": preds[i].item(),
                     "ground_truth": answers[i].item(),
                     "question_type": batch["question_types"][i],
                     "confidence": confidence[i].item(),
-                })
+                }
+                # Include soft scores for official VQA accuracy
+                if "answer_scores" in batch:
+                    pred_entry["answer_scores"] = batch["answer_scores"][i].tolist()
+                all_predictions.append(pred_entry)
 
     accuracy = correct / total if total > 0 else 0.0
     model.train()
@@ -241,9 +245,15 @@ def main():
             attention_mask = batch["attention_mask"].to(device)
             answers = batch["answer_idx"].to(device)
 
-            # Forward pass with mixed precision
             with torch.amp.autocast("cuda", enabled=use_amp):
                 logits, confidence, z = model(images, input_ids, attention_mask)
+
+            # Loss: soft-label BCE (official VQA training loss) or hard cross-entropy
+            use_soft = config.get("train_loss", "soft_bce") == "soft_bce" and "answer_scores" in batch
+            if use_soft:
+                answer_scores = batch["answer_scores"].to(device)
+                loss_vqa = F.binary_cross_entropy_with_logits(logits, answer_scores)
+            else:
                 loss_vqa = F.cross_entropy(logits, answers)
 
             # Gate auxiliary loss (fp32 for BCE numerical stability)
@@ -313,4 +323,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-# Update train_base for cached feature pipeline
