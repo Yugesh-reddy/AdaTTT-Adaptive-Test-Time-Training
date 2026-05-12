@@ -925,10 +925,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-# Polish figure generation color palette
-# Tune figure narrative arc and labels
-# Regenerate question type delta with updated colors
-# Improve figure report pipeline for publication
-# Regenerate ablation figures with final data
-# Update figure 01 with final axis labels
-# Update figure 02 pareto frontier annotation
+
