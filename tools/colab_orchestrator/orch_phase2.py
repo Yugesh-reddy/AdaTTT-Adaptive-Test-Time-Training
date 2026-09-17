@@ -11,13 +11,26 @@ import os
 import sys
 import time
 
-# Defaults must land before `import orch` — orch binds SESSION/WORK at import.
+# Defaults must land before `import orch` — orch binds SESSION/WORK/HELPER at import.
 os.environ.setdefault("ORCH_SESSION", "adattt-p2")
 os.environ.setdefault("ORCH_BUDGET_H", "6")
 os.environ.setdefault("ORCH_MAX_ALLOC", "8")
 os.environ.setdefault("ORCH_WORK", "/tmp/adattt-p2/orch1")
 os.environ.setdefault("ORCH_SETUP_TIMEOUT_S", "3600")
 os.environ.setdefault("ORCH_POLL_S", "120")
+
+# orch.py does ORCH_HELPER.split(), which breaks on "My Drive". Point it at a
+# space-free wrapper so token refresh actually runs (rc=0), not "unknown".
+if "ORCH_HELPER" not in os.environ:
+    _wrap = "/tmp/adattt-p2/colab_helper.sh"
+    os.makedirs("/tmp/adattt-p2", exist_ok=True)
+    _refresh = os.path.join(os.path.dirname(os.path.abspath(__file__)), "colab_refresh.py")
+    _py = "/Users/yugesh/.local/share/uv/tools/google-colab-cli/bin/python"
+    with open(_wrap, "w") as _fh:
+        _fh.write("#!/bin/sh\n")
+        _fh.write(f"exec {_py} {_refresh!r} \"$@\"\n")
+    os.chmod(_wrap, 0o755)
+    os.environ["ORCH_HELPER"] = _wrap
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
